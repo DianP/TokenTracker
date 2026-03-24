@@ -217,13 +217,8 @@ final class UpdateChecker {
 
             await MainActor.run {
                 switch result {
-                case .success(let savedURL):
-                    NSWorkspace.shared.open(savedURL)
-                    self.showAlert(
-                        title: "下载完成",
-                        message: "DMG 已下载到 \(savedURL.path)\n\n请将 TokenTrackerBar 拖入 Applications 文件夹完成安装，然后重启应用。",
-                        style: .informational
-                    )
+                case .success(let dmgURL):
+                    self.installFromDMG(dmgURL)
                 case .failure(let error):
                     self.showAlert(
                         title: "下载失败",
@@ -232,6 +227,121 @@ final class UpdateChecker {
                     )
                 }
             }
+        }
+    }
+
+    // MARK: - Auto Install
+
+    /// Mount DMG, copy .app to /Applications, unmount, relaunch.
+    private func installFromDMG(_ dmgURL: URL) {
+        Task.detached { [self] in
+            let installResult: Result<URL, Error>
+            do {
+                installResult = .success(try self.performInstall(dmgPath: dmgURL.path))
+            } catch {
+                installResult = .failure(error)
+            }
+
+            await MainActor.run {
+                switch installResult {
+                case .success(let installedApp):
+                    // Relaunch from the new app
+                    self.relaunch(appURL: installedApp)
+                case .failure(let error):
+                    // Fallback: open DMG manually
+                    NSWorkspace.shared.open(dmgURL)
+                    self.showAlert(
+                        title: "自动安装失败",
+                        message: "\(error.localizedDescription)\n\nDMG 已打开，请手动将 TokenTrackerBar 拖入 Applications 文件夹。",
+                        style: .warning
+                    )
+                }
+            }
+        }
+    }
+
+    nonisolated private func performInstall(dmgPath: String) throws -> URL {
+        // 1. Mount DMG
+        let mountProcess = Process()
+        mountProcess.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        mountProcess.arguments = ["attach", dmgPath, "-nobrowse", "-quiet", "-mountrandom", "/tmp"]
+
+        let mountPipe = Pipe()
+        mountProcess.standardOutput = mountPipe
+        mountProcess.standardError = Pipe()
+        try mountProcess.run()
+        mountProcess.waitUntilExit()
+
+        guard mountProcess.terminationStatus == 0 else {
+            throw UpdateError.installFailed("无法挂载 DMG")
+        }
+
+        // Parse mount point from hdiutil output
+        let mountOutput = String(data: mountPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let mountPoint = mountOutput
+            .split(separator: "\n")
+            .last?
+            .split(separator: "\t")
+            .last?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+
+        guard !mountPoint.isEmpty, FileManager.default.fileExists(atPath: mountPoint) else {
+            throw UpdateError.installFailed("无法找到挂载点")
+        }
+
+        defer {
+            // Always unmount
+            let detach = Process()
+            detach.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+            detach.arguments = ["detach", mountPoint, "-quiet", "-force"]
+            detach.standardOutput = Pipe()
+            detach.standardError = Pipe()
+            try? detach.run()
+            detach.waitUntilExit()
+        }
+
+        // 2. Find .app in mounted DMG
+        let fm = FileManager.default
+        let contents = try fm.contentsOfDirectory(atPath: mountPoint)
+        guard let appName = contents.first(where: { $0.hasSuffix(".app") }) else {
+            throw UpdateError.installFailed("DMG 中未找到 .app")
+        }
+
+        let sourceApp = URL(fileURLWithPath: mountPoint).appendingPathComponent(appName)
+        let destApp = URL(fileURLWithPath: "/Applications").appendingPathComponent(appName)
+
+        // 3. Replace existing app
+        if fm.fileExists(atPath: destApp.path) {
+            try fm.removeItem(at: destApp)
+        }
+        try fm.copyItem(at: sourceApp, to: destApp)
+
+        // 4. Clean up DMG file
+        try? fm.removeItem(atPath: dmgPath)
+
+        return destApp
+    }
+
+    private func relaunch(appURL: URL) {
+        // Use open -n to launch the new app, then exit current
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-n", appURL.path, "--args", "--after-update"]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            // Give the new process a moment to start
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                NSApp.terminate(nil)
+            }
+        } catch {
+            showAlert(
+                title: "更新完成",
+                message: "新版本已安装到 /Applications，请手动重启应用。",
+                style: .informational
+            )
         }
     }
 
@@ -251,6 +361,7 @@ final class UpdateChecker {
         case curlFailed(Int)
         case emptyResponse
         case downloadFailed
+        case installFailed(String)
         case noRelease
 
         var errorDescription: String? {
@@ -258,6 +369,7 @@ final class UpdateChecker {
             case .curlFailed(let code): return "网络请求失败 (curl exit \(code))，请检查网络连接。"
             case .emptyResponse: return "服务器返回空响应。"
             case .downloadFailed: return "文件下载失败，请重试。"
+            case .installFailed(let reason): return "安装失败: \(reason)"
             case .noRelease: return "暂无发布版本。"
             }
         }

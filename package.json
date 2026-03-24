@@ -1,7 +1,7 @@
 {
   "name": "tokentracker-cli",
-  "version": "0.3.3",
-  "description": "Token usage tracker for AI agent CLIs (Claude Code, Codex, Cursor, Gemini, OpenCode, OpenClaw)",
+  "version": "0.3.4",
+  "description": "Token usage tracker for AI agent CLIs (Claude Code, Codex, Cursor, Kiro, Gemini, OpenCode, OpenClaw)",
   "main": "src/cli.js",
   "bin": {
     "tracker": "bin/tracker.js",
