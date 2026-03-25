@@ -27,6 +27,8 @@ Download `TokenTrackerBar.dmg` from the [latest release](https://github.com/mm78
 - Lives in your menu bar — click to see usage stats
 - Auto-syncs data from all supported CLI tools
 - No terminal, no Node.js, no setup required
+- **Clawd pixel companion** — animated menu bar icon with breathing, blinking, and eye tracking
+- **Interactive dashboard buddy** — Clawd reacts to your usage data with 30+ contextual quips, 5 tap animations, and data-driven moods
 
 <div align="center">
   <img src="docs/screenshots/menubar.jpeg" alt="Menu Bar App" width="420" />
@@ -144,6 +146,11 @@ xcodebuild -scheme TokenTrackerBar -configuration Release clean build
 ```
 
 Requires: Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+
+## Credits
+
+Clawd pixel art inspired by [Clawd-on-Desk](https://github.com/Angel2518975237/Clawd-on-Desk) by [@marciogranzotto](https://github.com/marciogranzotto).
+Clawd character design belongs to Anthropic. This is a community project with no official affiliation with Anthropic.
 
 ## License
 
