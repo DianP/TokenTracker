@@ -391,10 +391,10 @@ async function cmdSync(argv) {
           "Sync finished:",
           `- Parsed files: ${totalParsed}`,
           `- New 30-min buckets queued: ${totalBuckets}`,
-          deviceToken
+          runtime.deviceToken
             ? `- Uploaded: ${uploadResult.inserted} inserted, ${uploadResult.skipped} skipped`
             : "- Uploaded: skipped (no device token)",
-          deviceToken && pendingBytes > 0 && !opts.drain
+          runtime.deviceToken && pendingBytes > 0 && !opts.drain
             ? `- Remaining: ${formatBytes(pendingBytes)} pending (run sync again, or use --drain)`
             : null,
           "",
