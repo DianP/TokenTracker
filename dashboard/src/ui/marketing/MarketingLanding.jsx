@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
 import { cn } from "../../lib/cn";
@@ -7,6 +7,7 @@ import { HeaderGithubStar } from "../openai/components/HeaderGithubStar.jsx";
 import { InsforgeUserHeaderControls } from "../../components/InsforgeUserHeaderControls.jsx";
 import { useInsforgeAuth } from "../../contexts/InsforgeAuthContext.jsx";
 import LaserFlow from "./components/LaserFlow.jsx";
+import LightRays from "./components/LightRays.jsx";
 
 function AppleIcon({ className }) {
   return (
@@ -70,6 +71,14 @@ export function MarketingLanding({
   onCopyInstallCommand,
 }) {
   const reduceMotion = useReducedMotion();
+  const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 10);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   const isLocalMode =
     typeof window !== "undefined" &&
     (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
@@ -102,8 +111,25 @@ export function MarketingLanding({
   const spring = reduceMotion ? { duration: 0 } : undefined;
 
   return (
-    <div className="min-h-screen bg-oai-gray-950 text-oai-white font-oai antialiased dark">
-      <header className="sticky top-0 z-50 bg-oai-gray-950/80 backdrop-blur-md border-b border-oai-gray-900">
+    <div className="relative min-h-screen bg-oai-gray-950 text-oai-white font-oai antialiased dark">
+      {/* LightRays — covers header + hero, behind all content */}
+      <div className="absolute inset-0 z-0 pointer-events-none" style={{ height: "100vh" }}>
+        <LightRays
+          raysOrigin="top-center"
+          raysColor="#b8b3ff"
+          raysSpeed={1}
+          lightSpread={0.5}
+          rayLength={3}
+          pulsating={false}
+          fadeDistance={1}
+          saturation={1}
+          followMouse
+          mouseInfluence={0.1}
+          noiseAmount={0}
+          distortion={0}
+        />
+      </div>
+      <header className={cn("sticky top-0 z-50 transition-all duration-300", scrolled ? "bg-oai-gray-950/80 backdrop-blur-md border-b border-oai-gray-900" : "bg-transparent border-b border-transparent")}>
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-5">
             <Link
@@ -141,8 +167,8 @@ export function MarketingLanding({
       </header>
 
       <main>
-        <section className="py-16 sm:py-24 lg:py-32">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 flex flex-col items-center text-center gap-20 lg:gap-36">
+        <section className="relative py-16 sm:py-24 lg:py-32 overflow-hidden">
+          <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 flex flex-col items-center text-center gap-20 lg:gap-36">
             <motion.div
               initial={reduceMotion ? false : { opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
