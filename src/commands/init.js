@@ -72,7 +72,7 @@ const ASCII_LOGO = [
 ].join("\n");
 
 const DIVIDER = "----------------------------------------------";
-const DEFAULT_DASHBOARD_URL = "https://www.tokentracker.cc";
+const DEFAULT_DASHBOARD_URL = "https://token.rynn.me";
 
 async function cmdInit(argv) {
   const opts = parseArgs(argv);

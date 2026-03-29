@@ -116,11 +116,7 @@ export function DashboardView(props) {
                     </div>
                   </div>
                 ) : null}
-                {isLocalMode ? (
-                  <FadeIn delay={0.1}>
-                    <MacAppBanner />
-                  </FadeIn>
-                ) : null}
+                {isLocalMode ? <MacAppBanner /> : null}
 
                 <StatsPanel
                   title={copy("dashboard.identity.title")}

@@ -93,7 +93,7 @@ function addUtcDays(date, days) {
 
 function isProductionHost(hostname) {
   if (!hostname) return false;
-  return hostname === "www.tokentracker.cc";
+  return hostname === "token.rynn.me";
 }
 
 function isForceInstallEnabled() {
