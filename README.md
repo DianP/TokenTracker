@@ -10,11 +10,8 @@
 [![Node.js Support](https://img.shields.io/badge/Node.js-≥20-brightgreen.svg)](https://nodejs.org/)
 [![Platform](https://img.shields.io/badge/Platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
 
-</div>
+<img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard (Dark)" width="800" />
 
-<div align="center">
-  <img src="docs/screenshots/dashboard-dark.png" alt="Token Tracker Dashboard" width="800" />
-  <br/><br/>
 </div>
 
 ---
@@ -32,7 +29,7 @@ Download `TokenTrackerBar.dmg` from the [latest release](https://github.com/mm78
 - **Interactive dashboard buddy** — Clawd reacts to your usage data with 30+ contextual quips, 5 tap animations, and data-driven moods
 
 <div align="center">
-  <img src="docs/screenshots/menubar.jpeg" alt="Menu Bar App" width="420" />
+  <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/menubar.gif" alt="Menu Bar App" width="420" />
 </div>
 
 ### Option B: CLI + Web Dashboard
@@ -56,7 +53,15 @@ tokentracker doctor       # Health check
 ---
 
 <div align="center">
-  <img src="docs/screenshots/dashboard-light.png" alt="Web Dashboard" width="800" />
+  <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/dashboard-light.png" alt="Token Tracker Dashboard (Light)" width="800" />
+</div>
+
+## Leaderboard
+
+Compare your token usage with developers worldwide. Sign in to join the ranking.
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/leaderboard.png" alt="Leaderboard" width="800" />
 </div>
 
 ## Features
@@ -65,6 +70,7 @@ tokentracker doctor       # Health check
 - **Local-First** — All data stays on your machine. No cloud account required.
 - **Zero-Config** — Hooks auto-detect and configure on first run
 - **Built-in Dashboard** — Web UI with usage trends, model breakdowns, heatmaps
+- **Leaderboard** — Global ranking with weekly, monthly, and all-time stats
 - **Privacy-First** — Only token counts tracked, never prompts or responses
 
 ## Supported CLI Tools
@@ -163,6 +169,3 @@ Clawd character design belongs to Anthropic. This is a community project with no
   <b>Token Tracker</b> — Quantify your AI output.<br/>
   <a href="https://token.rynn.me">token.rynn.me</a> · Made by developers, for developers.
 </div>
-
-## Recent UI Updates
-- **Leaderboard Redesign**: The leaderboard page and profile page have been entirely overhauled to follow the new modern "oai" design language used by the landing page, migrating away from the old matrix-terminal style.
