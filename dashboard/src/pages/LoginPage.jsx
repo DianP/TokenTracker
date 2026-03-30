@@ -111,15 +111,13 @@ export function LoginPage() {
 
   const redirectAfterOAuth = useMemo(() => {
     if (typeof window === "undefined") return "";
-    return `${window.location.origin}${nextPath}`;
-  }, [nextPath]);
+    return `${window.location.origin}/`;
+  }, []);
 
   const signInRedirectForEmail = useMemo(() => {
     if (typeof window === "undefined") return "";
-    const q = new URLSearchParams();
-    q.set("next", nextPath);
-    return `${window.location.origin}/login?${q.toString()}`;
-  }, [nextPath]);
+    return `${window.location.origin}/`;
+  }, []);
 
   const handleEmailAuth = useCallback(
     async (e) => {

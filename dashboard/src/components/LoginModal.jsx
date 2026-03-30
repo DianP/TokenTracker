@@ -105,7 +105,7 @@ export function LoginModal() {
 
   const redirectUrl = useMemo(() => {
     if (typeof window === "undefined") return "";
-    return window.location.href;
+    return window.location.origin + "/";
   }, []);
 
   const handleOAuth = useCallback(async (provider) => {

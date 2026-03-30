@@ -462,6 +462,7 @@ function createLocalApiHandler({ queuePath }) {
 
     // --- auth proxy: forward /api/auth/* to InsForge cloud ---
     if (p.startsWith("/api/auth/")) {
+      const { DEFAULT_BASE_URL } = require("./runtime-config.js");
       let insforgeBase = process.env.TOKENTRACKER_INSFORGE_BASE_URL
         || process.env.INSFORGE_BASE_URL
         || "";
@@ -473,8 +474,7 @@ function createLocalApiHandler({ queuePath }) {
         } catch { /* ignore */ }
       }
       if (!insforgeBase) {
-        json(res, { error: "InsForge base URL not configured" }, 500);
-        return true;
+        insforgeBase = DEFAULT_BASE_URL;
       }
       try {
         const targetUrl = `${insforgeBase.replace(/\/$/, "")}${p}${url.search || ""}`;
