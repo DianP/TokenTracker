@@ -13,6 +13,7 @@ import { isScreenshotModeEnabled } from "./lib/screenshot-mode";
 import { useCloudUsageSync } from "./hooks/use-cloud-usage-sync";
 import { LandingPage } from "./pages/LandingPage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
+import { NativeAuthCallbackPage } from "./pages/NativeAuthCallbackPage.jsx";
 
 const DashboardPage = React.lazy(() =>
   import("./pages/DashboardPage.jsx").then((mod) => ({
@@ -95,7 +96,9 @@ export default function App() {
   const loadingShell = <div className="min-h-screen bg-[#050505]" />;
 
   let content = null;
-  if (normalizedPath === "/login") {
+  if (normalizedPath === "/auth/callback" || normalizedPath === "/auth/native-callback") {
+    content = <NativeAuthCallbackPage />;
+  } else if (normalizedPath === "/login") {
     content = <LoginPage />;
   } else if (gate === "landing") {
     content = (

@@ -9,10 +9,6 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     private var window: NSWindow?
     private var webView: WKWebView?
     private var loadingOverlay: NSView?
-    /// OAuth 流程进行中时放行所有导航，回到 localhost 后自动复位
-    private var oauthInProgress = false
-    /// OAuth 超时保护（30s）
-    private var oauthTimeoutTask: DispatchWorkItem?
     /// 加载失败重试计数
     private var retryCount = 0
     private let maxRetries = 5
@@ -172,32 +168,12 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     func windowWillClose(_ notification: Notification) {
         // Keep webView and window alive so cookies/login state persist.
-        // Only reset transient OAuth state.
-        cancelOAuthTimeout()
-        oauthInProgress = false
         DispatchQueue.main.async {
             let hasVisibleWindows = NSApp.windows.contains { $0.isVisible && !$0.isKind(of: NSPanel.self) }
             if !hasVisibleWindows {
                 NSApp.setActivationPolicy(.accessory)
             }
         }
-    }
-
-    // MARK: - OAuth Timeout
-
-    private func startOAuthTimeout() {
-        cancelOAuthTimeout()
-        let task = DispatchWorkItem { [weak self] in
-            guard let self, self.oauthInProgress else { return }
-            self.oauthInProgress = false
-        }
-        oauthTimeoutTask = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: task)
-    }
-
-    private func cancelOAuthTimeout() {
-        oauthTimeoutTask?.cancel()
-        oauthTimeoutTask = nil
     }
 
     // MARK: - WKScriptMessageHandler
@@ -217,9 +193,29 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         guard name == "nativeOAuth",
               let urlString = body as? String,
               let url = URL(string: urlString) else { return }
-        oauthInProgress = true
-        startOAuthTimeout()
-        webView?.load(URLRequest(url: url))
+        // Open OAuth in system browser where user has saved Google/GitHub sessions
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Called when `tokentracker://auth/done` deep link is received after browser login.
+    func handleAuthDone() {
+        showWindow()
+        // Reload dashboard so InsForge SDK picks up session from server-side cookie relay
+        if let url = URL(string: Constants.serverBaseURL + "?app=1") {
+            webView?.load(URLRequest(url: url))
+        }
+    }
+
+    /// Called when browser relays OAuth code back via `tokentracker://auth/callback?insforge_code=xxx`.
+    /// Loads the callback page in the WebView so the SDK can exchange the code using the
+    /// PKCE verifier that's already in WebView's sessionStorage.
+    func handleAuthCallback(code: String) {
+        showWindow()
+        let encoded = code.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? code
+        let callbackUrl = Constants.serverBaseURL + "/auth/callback?insforge_code=\(encoded)"
+        if let url = URL(string: callbackUrl) {
+            webView?.load(URLRequest(url: url))
+        }
     }
 
     // MARK: - WKUIDelegate
@@ -231,12 +227,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         if let url = navigationAction.request.url {
-            if oauthInProgress {
-                // OAuth 流程中 target="_blank" 仍在当前 WebView 加载
-                webView.load(URLRequest(url: url))
-            } else {
-                NSWorkspace.shared.open(url)
-            }
+            NSWorkspace.shared.open(url)
         }
         return nil
     }
@@ -252,17 +243,8 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
             decisionHandler(.allow)
             return
         }
-        // Allow local dashboard navigation; OAuth 完成回到 localhost 时复位标记
+        // Allow local dashboard navigation
         if url.host == "localhost" || url.host == "127.0.0.1" {
-            if oauthInProgress {
-                oauthInProgress = false
-                cancelOAuthTimeout()
-            }
-            decisionHandler(.allow)
-            return
-        }
-        // OAuth 流程进行中 — 放行 OAuth 提供商的重定向链
-        if oauthInProgress {
             decisionHandler(.allow)
             return
         }

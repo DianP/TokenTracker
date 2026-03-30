@@ -112,23 +112,46 @@ export function InsforgeAuthProvider({ children }) {
   const signInWithOAuth = useCallback(
     async (provider, redirectToOverride) => {
       if (!client) return { error: new Error("InsForge client not configured") };
+      const nativeBridge =
+        typeof window !== "undefined" && window.webkit?.messageHandlers?.nativeOAuth;
+      if (nativeBridge) {
+        // Native macOS App: open system browser for OAuth.
+        // PKCE must be initialized in the same context that handles the callback.
+        // We pass native=1 in the redirectTo URL so callback page knows to redirect back to app.
+        const redirectTo =
+          typeof redirectToOverride === "string" && redirectToOverride.trim()
+            ? redirectToOverride.trim()
+            : `${window.location.origin}/auth/callback`;
+        const result = await client.auth.signInWithOAuth({
+          provider,
+          redirectTo,
+          // @ts-ignore - skipBrowserRedirect is supported but not in types
+          skipBrowserRedirect: true,
+        });
+        if (result.data?.url) {
+          // Tell the local server that the next /auth/callback is a native app flow.
+          // The callback page (in system browser) checks this flag to relay code back to app.
+          try {
+            await fetch("/api/auth-bridge/verifier", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ native: true }),
+            });
+          } catch {}
+          nativeBridge.postMessage(result.data.url);
+        }
+        return result;
+      }
       const redirectTo =
         typeof redirectToOverride === "string" && redirectToOverride.trim()
           ? redirectToOverride.trim()
           : typeof window !== "undefined"
             ? `${window.location.origin}/dashboard`
             : undefined;
-      // 原生 macOS App WebView：拦截 OAuth URL 交由 Swift 在 WebView 内完成
-      const nativeBridge =
-        typeof window !== "undefined" && window.webkit?.messageHandlers?.nativeOAuth;
       const result = await client.auth.signInWithOAuth({
         provider,
         redirectTo,
-        skipBrowserRedirect: Boolean(nativeBridge),
       });
-      if (nativeBridge && result.data?.url) {
-        nativeBridge.postMessage(result.data.url);
-      }
       return result;
     },
     [client],

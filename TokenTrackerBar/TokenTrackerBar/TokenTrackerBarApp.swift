@@ -38,4 +38,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         serverManager.stopServer()
     }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard url.scheme == "tokentracker" else { continue }
+            if url.host == "auth" && url.path.hasPrefix("/done") {
+                DashboardWindowController.shared.handleAuthDone()
+            } else if url.host == "auth" && url.path.hasPrefix("/callback") {
+                // Browser relays OAuth code back via tokentracker://auth/callback?insforge_code=xxx
+                let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+                let code = components?.queryItems?.first(where: { $0.name == "insforge_code" })?.value
+                if let code {
+                    DashboardWindowController.shared.handleAuthCallback(code: code)
+                }
+            }
+        }
+    }
 }

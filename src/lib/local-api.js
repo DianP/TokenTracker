@@ -457,8 +457,72 @@ function json(res, data, status) {
 function createLocalApiHandler({ queuePath }) {
   const qp = queuePath || resolveQueuePath();
 
+  // Server-side cookie relay: captures auth cookies from InsForge cloud responses
+  // so that both browser and WKWebView share the same login session via the proxy.
+  const relayCookies = new Map();
+
+  function captureSetCookies(headerValue) {
+    if (!headerValue) return;
+    const parts = headerValue.split(/,(?=\s*\w+=)/);
+    for (const raw of parts) {
+      const eqIdx = raw.indexOf("=");
+      if (eqIdx < 1) continue;
+      const name = raw.substring(0, eqIdx).trim();
+      if (!name) continue;
+      relayCookies.set(name, raw.trim());
+    }
+  }
+
+  function buildRelayCookieHeader(clientCookieHeader) {
+    if (relayCookies.size === 0) return clientCookieHeader || "";
+    const clientPairs = new Map();
+    if (clientCookieHeader) {
+      for (const part of clientCookieHeader.split(";")) {
+        const eqIdx = part.indexOf("=");
+        if (eqIdx < 1) continue;
+        const n = part.substring(0, eqIdx).trim();
+        if (n) clientPairs.set(n, part.trim());
+      }
+    }
+    // Merge relay cookies (client takes precedence)
+    for (const [name, raw] of relayCookies) {
+      if (clientPairs.has(name)) continue;
+      const scIdx = raw.indexOf(";");
+      const pair = scIdx > 0 ? raw.substring(0, scIdx).trim() : raw;
+      clientPairs.set(name, pair);
+    }
+    return [...clientPairs.values()].join("; ");
+  }
+
+  // Ephemeral auth bridge: WebView sets a "native" flag before opening system browser
+  // for OAuth. The callback page (in browser) checks this flag to decide whether to
+  // relay the code back to the app or handle it as a normal web flow.
+  let _nativeAuthPending = false;
+  let _nativeAuthExpiry = 0;
+
   return async function handleLocalApi(req, res, url) {
     const p = url.pathname;
+
+    // --- Auth bridge: native OAuth flag (WebView ↔ system browser) ---
+    if (p === "/api/auth-bridge/verifier") {
+      const method = String(req.method || "GET").toUpperCase();
+      if (method === "PUT" || method === "POST") {
+        const body = await readJsonBody(req);
+        _nativeAuthPending = Boolean(body?.native);
+        _nativeAuthExpiry = Date.now() + 5 * 60 * 1000; // 5 min TTL
+        json(res, { ok: true });
+        return true;
+      }
+      if (method === "GET") {
+        const isNative = _nativeAuthPending && Date.now() < _nativeAuthExpiry;
+        _nativeAuthPending = false; // one-time read
+        _nativeAuthExpiry = 0;
+        json(res, { native: isNative });
+        return true;
+      }
+      json(res, { error: "Method Not Allowed" }, 405);
+      return true;
+    }
 
     // --- auth proxy: forward /api/auth/* to InsForge cloud ---
     if (p.startsWith("/api/auth/")) {
@@ -483,6 +547,10 @@ function createLocalApiHandler({ queuePath }) {
           if (key === "host" || key === "connection") continue;
           proxyHeaders[key] = value;
         }
+        // Inject relay cookies so WebView benefits from browser's login session
+        const mergedCookie = buildRelayCookieHeader(proxyHeaders["cookie"]);
+        if (mergedCookie) proxyHeaders["cookie"] = mergedCookie;
+
         const bodyChunks = [];
         for await (const chunk of req) bodyChunks.push(chunk);
         const body = bodyChunks.length > 0 ? Buffer.concat(bodyChunks) : undefined;
@@ -493,17 +561,17 @@ function createLocalApiHandler({ queuePath }) {
           credentials: "include",
           redirect: "manual",
         });
-        res.writeHead(proxyRes.status, Object.fromEntries(
-          [...proxyRes.headers.entries()].filter(([k]) =>
-            !["transfer-encoding", "connection"].includes(k.toLowerCase())
-          ).map(([k, v]) => {
-            // Rewrite cookie domain to localhost
+        const responseHeaders = [...proxyRes.headers.entries()]
+          .filter(([k]) => !["transfer-encoding", "connection"].includes(k.toLowerCase()))
+          .map(([k, v]) => {
             if (k.toLowerCase() === "set-cookie") {
-              return [k, v.replace(/;\s*[Dd]omain=[^;]*/g, "; Domain=localhost")];
+              const rewritten = v.replace(/;\s*[Dd]omain=[^;]*/g, "; Domain=localhost");
+              captureSetCookies(rewritten);
+              return [k, rewritten];
             }
             return [k, v];
-          })
-        ));
+          });
+        res.writeHead(proxyRes.status, Object.fromEntries(responseHeaders));
         const resBody = await proxyRes.arrayBuffer();
         res.end(Buffer.from(resBody));
       } catch (e) {

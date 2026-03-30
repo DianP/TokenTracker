@@ -100,19 +100,35 @@ export function LoginPage() {
   useEffect(() => {
     if (!enabled || authLoading) return;
     if (signedIn) {
+      if (isNativeLogin) {
+        // Native app login in browser: redirect to callback page which triggers URL scheme
+        window.location.href = "/auth/native-callback";
+        return;
+      }
       navigate(nextPath, { replace: true });
     }
-  }, [enabled, authLoading, signedIn, navigate, nextPath]);
+  }, [enabled, authLoading, signedIn, navigate, nextPath, isNativeLogin]);
 
   useEffect(() => {
     if (!enabled) return;
     refreshUser();
   }, [enabled, refreshUser]);
 
+  const isNativeLogin = useMemo(() => {
+    return searchParams.get("native") === "1";
+  }, [searchParams]);
+
+  const autoProvider = useMemo(() => {
+    return searchParams.get("provider") || null;
+  }, [searchParams]);
+
   const redirectAfterOAuth = useMemo(() => {
     if (typeof window === "undefined") return "";
+    // For native app login, don't override — let InsforgeAuthContext use its default
+    // /auth/callback?native=1 redirect so the callback page can detect native mode.
+    if (isNativeLogin) return "";
     return `${window.location.origin}/`;
-  }, []);
+  }, [isNativeLogin]);
 
   const signInRedirectForEmail = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -173,6 +189,22 @@ export function LoginPage() {
     },
     [signInWithOAuth, redirectAfterOAuth],
   );
+
+  // Mark native login in sessionStorage so /auth/callback knows to redirect to app
+  useEffect(() => {
+    if (isNativeLogin && typeof window !== "undefined") {
+      try { window.sessionStorage.setItem("tokentracker_native_login", "1"); } catch {}
+    }
+  }, [isNativeLogin]);
+
+  // Auto-trigger OAuth when opened from native app with ?native=1&provider=xxx
+  useEffect(() => {
+    if (!enabled || authLoading || signedIn || configLoading || !isNativeLogin || !autoProvider) return;
+    const allProviders = [...oauthProviders, ...customProviders];
+    if (allProviders.includes(autoProvider)) {
+      handleOAuth(autoProvider);
+    }
+  }, [enabled, authLoading, signedIn, configLoading, isNativeLogin, autoProvider, oauthProviders, customProviders, handleOAuth]);
 
   const clearVerifyQuery = useCallback(() => {
     setSearchParams(
