@@ -1,25 +1,22 @@
 # Token Tracker LLMs Index
 
-Token Tracker tracks token usage across AI coding agent clients (Codex, Claude Code, OpenCode, Gemini, OpenClaw).
+Token Tracker tracks token usage across AI coding agent clients (Claude Code, Codex, Cursor, Kiro, Gemini, OpenCode, OpenClaw, Every Code).
 
 ## Canonical URL
-- [Homepage](https://www.tokentracker.cc/)
+- [Homepage](https://token.rynn.me/)
 
 ## Priority URLs
-- [Homepage](https://www.tokentracker.cc/)
-- [Share dashboard view](https://www.tokentracker.cc/share)
-- [Sitemap](https://www.tokentracker.cc/sitemap.xml)
-- [RSS feed](https://www.tokentracker.cc/feed.xml)
+- [Homepage](https://token.rynn.me/)
+- [Leaderboard](https://token.rynn.me/leaderboard)
 
 ## Product
-- Install command: `npx --yes tokentracker init`
+- Install command: `npx tokentracker-cli`
 - [NPM package](https://www.npmjs.com/package/tokentracker-cli)
-- [Source repository](https://github.com/mm7894215/tokentracker)
+- [Source repository](https://github.com/mm7894215/TokenTracker)
 
 ## Policy and Discovery
-- [robots.txt](https://www.tokentracker.cc/robots.txt)
-- [llms.txt](https://www.tokentracker.cc/llms.txt)
-- Data principle: minimal data collection and auditable metrics.
+- [llms.txt](https://token.rynn.me/llms.txt)
+- Data principle: token counts only, never prompts or conversation content.
 
 ## Contact
-- [GitHub issues](https://github.com/mm7894215/tokentracker/issues)
+- [GitHub issues](https://github.com/mm7894215/TokenTracker/issues)

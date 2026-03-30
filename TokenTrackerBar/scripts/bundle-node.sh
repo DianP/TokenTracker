@@ -3,23 +3,41 @@ set -euo pipefail
 
 # ──────────────────────────────────────────────
 # bundle-node.sh
-# Downloads Node.js universal binary and bundles
+# Downloads Node.js binary and bundles
 # tokentracker source into EmbeddedServer/
+#
+# Usage:
+#   ./bundle-node.sh              # universal (arm64 + x64)
+#   ./bundle-node.sh --arch arm64 # Apple Silicon only
+#   ./bundle-node.sh --arch x64   # Intel only
+#   ./bundle-node.sh --clean      # wipe EmbeddedServer/
 # ──────────────────────────────────────────────
 
 NODE_VERSION="22.14.0"
+TARGET_ARCH="universal"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 EMBED_DIR="$SCRIPT_DIR/../EmbeddedServer"
 
-# ── --clean flag: wipe EmbeddedServer/ and exit ──
-if [[ "${1:-}" == "--clean" ]]; then
-  echo "🧹 Cleaning EmbeddedServer/..."
-  rm -rf "$EMBED_DIR"
-  echo "Done."
-  exit 0
-fi
+# ── Parse args ──
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --clean)
+      echo "🧹 Cleaning EmbeddedServer/..."
+      rm -rf "$EMBED_DIR"
+      echo "Done."
+      exit 0
+      ;;
+    --arch)
+      TARGET_ARCH="${2:-universal}"
+      shift 2
+      ;;
+    *)
+      shift
+      ;;
+  esac
+done
 
 # ── Always start fresh ──
 rm -rf "$EMBED_DIR"
@@ -29,29 +47,37 @@ TMPDIR_BUNDLE="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_BUNDLE"' EXIT
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# 1. Download Node.js v${NODE_VERSION} universal binary
+# 1. Download Node.js v${NODE_VERSION}
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-echo "⬇️  Downloading Node.js v${NODE_VERSION} (arm64 + x64)..."
-
 NODE_BASE_URL="https://nodejs.org/dist/v${NODE_VERSION}"
 ARM64_TAR="node-v${NODE_VERSION}-darwin-arm64.tar.gz"
 X64_TAR="node-v${NODE_VERSION}-darwin-x64.tar.gz"
 
-curl -fSL --progress-bar -o "$TMPDIR_BUNDLE/$ARM64_TAR" "$NODE_BASE_URL/$ARM64_TAR"
-curl -fSL --progress-bar -o "$TMPDIR_BUNDLE/$X64_TAR"   "$NODE_BASE_URL/$X64_TAR"
+if [[ "$TARGET_ARCH" == "arm64" ]]; then
+  echo "⬇️  Downloading Node.js v${NODE_VERSION} (arm64 only)..."
+  curl -fSL --progress-bar -o "$TMPDIR_BUNDLE/$ARM64_TAR" "$NODE_BASE_URL/$ARM64_TAR"
+  tar -xzf "$TMPDIR_BUNDLE/$ARM64_TAR" -C "$TMPDIR_BUNDLE" "node-v${NODE_VERSION}-darwin-arm64/bin/node"
+  cp "$TMPDIR_BUNDLE/node-v${NODE_VERSION}-darwin-arm64/bin/node" "$EMBED_DIR/node"
+elif [[ "$TARGET_ARCH" == "x64" ]]; then
+  echo "⬇️  Downloading Node.js v${NODE_VERSION} (x64 only)..."
+  curl -fSL --progress-bar -o "$TMPDIR_BUNDLE/$X64_TAR" "$NODE_BASE_URL/$X64_TAR"
+  tar -xzf "$TMPDIR_BUNDLE/$X64_TAR" -C "$TMPDIR_BUNDLE" "node-v${NODE_VERSION}-darwin-x64/bin/node"
+  cp "$TMPDIR_BUNDLE/node-v${NODE_VERSION}-darwin-x64/bin/node" "$EMBED_DIR/node"
+else
+  echo "⬇️  Downloading Node.js v${NODE_VERSION} (arm64 + x64)..."
+  curl -fSL --progress-bar -o "$TMPDIR_BUNDLE/$ARM64_TAR" "$NODE_BASE_URL/$ARM64_TAR"
+  curl -fSL --progress-bar -o "$TMPDIR_BUNDLE/$X64_TAR"   "$NODE_BASE_URL/$X64_TAR"
+  tar -xzf "$TMPDIR_BUNDLE/$ARM64_TAR" -C "$TMPDIR_BUNDLE" "node-v${NODE_VERSION}-darwin-arm64/bin/node"
+  tar -xzf "$TMPDIR_BUNDLE/$X64_TAR"   -C "$TMPDIR_BUNDLE" "node-v${NODE_VERSION}-darwin-x64/bin/node"
+  echo "🔗 Creating universal binary with lipo..."
+  lipo -create \
+    "$TMPDIR_BUNDLE/node-v${NODE_VERSION}-darwin-arm64/bin/node" \
+    "$TMPDIR_BUNDLE/node-v${NODE_VERSION}-darwin-x64/bin/node" \
+    -output "$EMBED_DIR/node"
+fi
 
-echo "📦 Extracting node binaries..."
-tar -xzf "$TMPDIR_BUNDLE/$ARM64_TAR" -C "$TMPDIR_BUNDLE" "node-v${NODE_VERSION}-darwin-arm64/bin/node"
-tar -xzf "$TMPDIR_BUNDLE/$X64_TAR"   -C "$TMPDIR_BUNDLE" "node-v${NODE_VERSION}-darwin-x64/bin/node"
-
-NODE_ARM64="$TMPDIR_BUNDLE/node-v${NODE_VERSION}-darwin-arm64/bin/node"
-NODE_X64="$TMPDIR_BUNDLE/node-v${NODE_VERSION}-darwin-x64/bin/node"
-
-echo "🔗 Creating universal binary with lipo..."
-lipo -create "$NODE_ARM64" "$NODE_X64" -output "$EMBED_DIR/node"
 chmod +x "$EMBED_DIR/node"
-
-echo "✅ Node.js universal binary ready"
+echo "✅ Node.js binary ready ($TARGET_ARCH)"
 file "$EMBED_DIR/node"
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -119,7 +145,7 @@ find "$TT_DIR/node_modules" -type d \( \
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 echo ""
 echo "═══════════════════════════════════════"
-echo "  EmbeddedServer Size Report"
+echo "  EmbeddedServer Size Report ($TARGET_ARCH)"
 echo "═══════════════════════════════════════"
 
 NODE_SIZE=$(du -sh "$EMBED_DIR/node" | cut -f1)
