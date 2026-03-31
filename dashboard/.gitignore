@@ -8,8 +8,13 @@
 .augment
 .claude
 .cline
+.codebuddy
+.continue
+.cursor
 .github/copilot*
+.iflow
 .kilocode
+.kiro
 .qoder
 .qwen
 .roo

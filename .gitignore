@@ -44,29 +44,51 @@ TokenTrackerBar/EmbeddedServer/
 TokenTrackerBar/build/
 TokenTrackerBar/TokenTrackerBar.xcodeproj/
 TokenTrackerBar/icon_composer/
+TokenTrackerBar/DerivedData/
+TokenTrackerBar/*.xcarchive
 
-# AI Agent folders
+# AI / IDE tooling
+.agent
+.agents/
 .augment/
 .claude/
+.cline
+.codebuddy/
+.continue/
+.cursor/
+.github/copilot*
 .gstack/
+.iflow/
+.insforge/
 .kilocode/
+.kiro/
 .qoder/
 .qwen/
 .roo/
 .trae/
 .windsurf/
 
-# InsForge & AI agent skills
-.insforge
-.agent
-.agents
-.augment
-.claude
-.cline
-.github/copilot*
-.kilocode
-.qoder
-.qwen
-.roo
-.trae
-.windsurf
+# System & Editor
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# Build & Cache
+.eslintcache
+.parcel-cache
+.turbo
+node_modules/
+dist/
+build/
+.tmp/
+*.tsbuildinfo

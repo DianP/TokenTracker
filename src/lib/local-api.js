@@ -461,21 +461,39 @@ function createLocalApiHandler({ queuePath }) {
   // Server-side cookie relay: captures auth cookies from InsForge cloud responses
   // so that both browser and WKWebView share the same login session via the proxy.
   // Persisted to disk so cookies survive server restarts.
-  const relayCookies = new Map();
-  const cookiePath = path.join(os.homedir(), ".tokentracker", "tracker", "relay-cookies.json");
+  let relayCookies = new Map();
+  const trackerDataDir = path.join(os.homedir(), ".tokentracker", "tracker");
+  const cookiePath = path.join(trackerDataDir, "relay-cookies.json");
 
   // Load persisted cookies on startup
   try {
-    const saved = JSON.parse(fs.readFileSync(cookiePath, "utf8"));
-    if (saved && typeof saved === "object") {
-      for (const [k, v] of Object.entries(saved)) relayCookies.set(k, v);
+    if (!fs.existsSync(trackerDataDir)) fs.mkdirSync(trackerDataDir, { recursive: true });
+    if (fs.existsSync(cookiePath)) {
+      const content = fs.readFileSync(cookiePath, "utf8");
+      const saved = JSON.parse(content);
+      if (saved && typeof saved === "object") {
+        let count = 0;
+        for (const [k, v] of Object.entries(saved)) {
+          relayCookies.set(k, v);
+          count++;
+        }
+        if (count > 0) console.log(`[LocalAPI] Loaded ${count} relay cookies from ${cookiePath}`);
+      }
     }
-  } catch { /* no saved cookies yet */ }
+  } catch (e) {
+    console.error("[LocalAPI] Failed to load relay cookies:", e.message);
+  }
 
   function persistRelayCookies() {
     try {
-      fs.writeFileSync(cookiePath, JSON.stringify(Object.fromEntries(relayCookies)), { encoding: "utf8", mode: 0o600 });
-    } catch { /* ignore write errors */ }
+      // Sticky semantics: never replace an existing on-disk session with an empty cookie map.
+      if (relayCookies.size === 0) return;
+      
+      const json = JSON.stringify(Object.fromEntries(relayCookies));
+      fs.writeFileSync(cookiePath, json, { encoding: "utf8", mode: 0o600 });
+    } catch (e) {
+      console.error("[LocalAPI] Failed to persist relay cookies:", e.message);
+    }
   }
 
   function captureSetCookies(headerValue) {
@@ -487,8 +505,26 @@ function createLocalApiHandler({ queuePath }) {
       if (eqIdx < 1) continue;
       const name = raw.substring(0, eqIdx).trim();
       if (!name) continue;
-      relayCookies.set(name, raw.trim());
-      changed = true;
+
+      // Basic sticky logic: if it's a deletion cookie (Max-Age=0 or past date),
+      // we only remove it if we have it.
+      const lower = raw.toLowerCase();
+      const isDeletion = lower.includes("max-age=0") || lower.includes("expires=thu, 01 jan 1970");
+      
+      if (isDeletion) {
+        if (relayCookies.has(name)) {
+          relayCookies.delete(name);
+          changed = true;
+          console.log(`[LocalAPI] Cookie deleted: ${name}`);
+        }
+      } else {
+        const oldVal = relayCookies.get(name);
+        if (oldVal !== raw.trim()) {
+          relayCookies.set(name, raw.trim());
+          changed = true;
+          console.log(`[LocalAPI] Cookie captured: ${name}`);
+        }
+      }
     }
     if (changed) persistRelayCookies();
   }
