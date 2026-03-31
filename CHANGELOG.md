@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.5.17] - 2026-03-31
+
+### Fixed
+
+- Preserve the macOS dashboard relay cookie file across updates and restarts so embedded dashboard sessions no longer get wiped unexpectedly.
+- Isolate relay cookie persistence coverage to a temporary HOME so `npm test` never mutates a developer's real local login state.
+
 ## [0.2.21] - 2026-02-18
 
 ### Changed
