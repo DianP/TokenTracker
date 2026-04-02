@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState, useEffect } from "react";
-import { useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
-import { UserCircle, LogOut } from "lucide-react";
+import { LogOut, Pencil } from "lucide-react";
 import { useInsforgeAuth } from "../contexts/InsforgeAuthContext.jsx";
 import { useLoginModal } from "../contexts/LoginModalContext.jsx";
 import { resolveAuthAccessTokenWithRetry } from "../lib/auth-token";
@@ -78,7 +77,6 @@ function SettingsRow({ label, checked, onChange, disabled }) {
 }
 
 export function InsforgeUserHeaderControls({ className }) {
-  const location = useLocation();
   const { enabled, loading, signedIn, user, signOut, getAccessToken } = useInsforgeAuth();
   const { openLoginModal } = useLoginModal();
   const [panelOpen, setPanelOpen] = useState(false);
@@ -87,6 +85,10 @@ export function InsforgeUserHeaderControls({ className }) {
   const [anonymousOn, setAnonymousOn] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [customDisplayName, setCustomDisplayName] = useState(null);
+  const [nameInput, setNameInput] = useState("");
+  const nameInputRef = useRef(null);
   const wrapRef = useRef(null);
   const showLocalCloudSync = enabled && signedIn && isLocalDashboardHost();
 
@@ -117,6 +119,7 @@ export function InsforgeUserHeaderControls({ className }) {
         if (!active) return;
         setPublicProfileOn(Boolean(data?.enabled));
         setAnonymousOn(Boolean(data?.anonymous));
+        if (data?.display_name) setCustomDisplayName(data.display_name);
       } catch {
         /* ignore */
       } finally {
@@ -159,6 +162,36 @@ export function InsforgeUserHeaderControls({ className }) {
       setProfileSaving(false);
     }
   }, [publicProfileOn, profileSaving, getAccessToken]);
+
+  const handleStartEditName = useCallback(() => {
+    setPanelOpen(false);
+    setNameInput(customDisplayName || displayName);
+    setEditingName(true);
+    setTimeout(() => nameInputRef.current?.focus(), 50);
+  }, [customDisplayName, displayName]);
+
+  const handleCancelEditName = useCallback(() => {
+    setEditingName(false);
+    setNameInput("");
+  }, []);
+
+  const handleSaveDisplayName = useCallback(async () => {
+    if (profileSaving) return;
+    const trimmed = nameInput.trim().slice(0, 50);
+    if (!trimmed) return;
+    setProfileSaving(true);
+    try {
+      const token = await resolveAuthAccessTokenWithRetry({ getAccessToken });
+      if (!token) return;
+      await setPublicVisibility({ accessToken: token, display_name: trimmed });
+      setCustomDisplayName(trimmed);
+      setEditingName(false);
+    } catch {
+      /* ignore */
+    } finally {
+      setProfileSaving(false);
+    }
+  }, [nameInput, profileSaving, getAccessToken]);
 
   const handleAnonymousToggle = useCallback(async () => {
     if (profileSaving) return;
@@ -227,9 +260,65 @@ export function InsforgeUserHeaderControls({ className }) {
           </span>
         )}
         <span className="hidden sm:inline truncate text-sm font-medium text-oai-gray-900 dark:text-oai-gray-200 max-w-[120px]">
-          {displayName}
+          {customDisplayName || displayName}
         </span>
       </button>
+
+      {/* Edit Name Modal */}
+      <AnimatePresence>
+        {editingName && (
+          <motion.div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            onClick={handleCancelEditName}
+          >
+            <motion.div
+              className="w-[340px] rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 shadow-2xl p-5"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.15 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-base font-semibold text-oai-black dark:text-white mb-3">Edit Display Name</h3>
+              <input
+                ref={nameInputRef}
+                type="text"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSaveDisplayName();
+                  if (e.key === "Escape") handleCancelEditName();
+                }}
+                maxLength={50}
+                className="w-full rounded-md border border-oai-gray-300 dark:border-oai-gray-700 bg-transparent px-3 py-2 text-sm text-oai-black dark:text-white outline-none focus:border-oai-brand-500 focus:ring-1 focus:ring-oai-brand-500"
+                placeholder="Display name"
+              />
+              <p className="mt-1.5 text-xs text-oai-gray-400">This name will be shown on the leaderboard.</p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={handleCancelEditName}
+                  className="rounded-md px-3 py-1.5 text-sm text-oai-gray-500 hover:text-oai-gray-700 dark:hover:text-oai-gray-300 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveDisplayName}
+                  disabled={profileSaving || !nameInput.trim()}
+                  className="rounded-md bg-oai-brand-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-oai-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {profileSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {panelOpen && (
@@ -253,11 +342,11 @@ export function InsforgeUserHeaderControls({ className }) {
                 />
               ) : (
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-oai-brand-600 text-xs font-semibold text-white">
-                  {initialsFromName(displayName)}
+                  {initialsFromName(customDisplayName || displayName)}
                 </span>
               )}
               <div className="min-w-0">
-                <div className="text-sm font-medium text-oai-black dark:text-white truncate">{displayName}</div>
+                <div className="text-sm font-medium text-oai-black dark:text-white truncate">{customDisplayName || displayName}</div>
                 {email && <div className="text-xs text-oai-gray-500 truncate">{email}</div>}
               </div>
             </div>
@@ -285,15 +374,25 @@ export function InsforgeUserHeaderControls({ className }) {
               />
             </div>
 
-            {/* Sign out */}
-            <button
-              type="button"
-              onClick={handleSignOut}
-              className="flex w-full items-center gap-2 px-4 py-3 text-left text-sm text-oai-gray-500 dark:text-oai-gray-400 hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white transition-colors"
-            >
-              <LogOut className="h-4 w-4 shrink-0" aria-hidden />
-              Sign Out
-            </button>
+            {/* Actions */}
+            <div>
+              <button
+                type="button"
+                onClick={handleStartEditName}
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-oai-gray-500 dark:text-oai-gray-400 hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white transition-colors"
+              >
+                <Pencil className="h-4 w-4 shrink-0" aria-hidden />
+                Edit Name
+              </button>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-oai-gray-500 dark:text-oai-gray-400 hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white transition-colors"
+              >
+                <LogOut className="h-4 w-4 shrink-0" aria-hidden />
+                Sign Out
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

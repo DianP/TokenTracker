@@ -109,28 +109,58 @@ export default async function (req: Request): Promise<Response> {
       .eq("user_id", userId)
       .is("revoked_at", null)
       .maybeSingle();
+    const { data: profile } = await client.database
+      .from("tokentracker_user_profiles")
+      .select("display_name")
+      .eq("user_id", userId)
+      .maybeSingle();
     return json({
       enabled: data?.leaderboard_public || false,
       anonymous: data?.leaderboard_anonymous || false,
       share_token: pv?.token_hash || null,
       updated_at: data?.updated_at || null,
+      display_name: profile?.display_name || null,
     });
   }
   if (req.method === "POST") {
-    const body = await req.json().catch(() => ({})) as { enabled?: boolean; anonymous?: boolean };
-    const upsertRow: Record<string, unknown> = {
-      user_id: userId,
-      updated_at: new Date().toISOString(),
+    const body = await req.json().catch(() => ({})) as {
+      enabled?: boolean;
+      anonymous?: boolean;
+      display_name?: string;
     };
-    if (body.enabled !== undefined) upsertRow.leaderboard_public = Boolean(body.enabled);
-    if (body.anonymous !== undefined) upsertRow.leaderboard_anonymous = Boolean(body.anonymous);
-    await client.database.from("tokentracker_user_settings").upsert(
-      upsertRow,
-      { onConflict: "user_id" },
-    );
-    const result: Record<string, unknown> = { updated_at: upsertRow.updated_at };
+    const now = new Date().toISOString();
+
+    // Update settings (enabled / anonymous)
+    if (body.enabled !== undefined || body.anonymous !== undefined) {
+      const upsertRow: Record<string, unknown> = {
+        user_id: userId,
+        updated_at: now,
+      };
+      if (body.enabled !== undefined) upsertRow.leaderboard_public = Boolean(body.enabled);
+      if (body.anonymous !== undefined) upsertRow.leaderboard_anonymous = Boolean(body.anonymous);
+      await client.database.from("tokentracker_user_settings").upsert(
+        upsertRow,
+        { onConflict: "user_id" },
+      );
+    }
+
+    // Update display_name in user_profiles
+    if (typeof body.display_name === "string") {
+      const trimmed = body.display_name.trim().slice(0, 50);
+      await client.database.from("tokentracker_user_profiles").upsert(
+        {
+          user_id: userId,
+          display_name: trimmed || null,
+          updated_at: now,
+        },
+        { onConflict: "user_id" },
+      );
+    }
+
+    const result: Record<string, unknown> = { updated_at: now };
     if (body.enabled !== undefined) result.enabled = Boolean(body.enabled);
     if (body.anonymous !== undefined) result.anonymous = Boolean(body.anonymous);
+    if (typeof body.display_name === "string") result.display_name = body.display_name.trim().slice(0, 50) || null;
     return json(result);
   }
   return json({ error: "Method not allowed" }, 405);

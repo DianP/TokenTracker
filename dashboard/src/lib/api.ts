@@ -170,10 +170,11 @@ export async function getPublicVisibility({ accessToken }: AnyRecord = {}) {
   });
 }
 
-export async function setPublicVisibility({ accessToken, enabled, anonymous }: AnyRecord = {}) {
+export async function setPublicVisibility({ accessToken, enabled, anonymous, display_name }: AnyRecord = {}) {
   const body: AnyRecord = {};
   if (enabled !== undefined) body.enabled = Boolean(enabled);
   if (anonymous !== undefined) body.anonymous = Boolean(anonymous);
+  if (display_name !== undefined) body.display_name = String(display_name);
   return fetchInsforgeFunction("tokentracker-public-visibility", {
     accessToken,
     method: "POST",
