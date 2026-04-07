@@ -69,6 +69,28 @@ jobs:
             OTHER_SWIFT_FLAGS="\$(inherited) -Xfrontend -solver-expression-time-threshold=120" \
             clean build
 
+      # 4b. Ad-hoc sign — without this, Gatekeeper rejects the downloaded .app
+      # as "damaged" because CODE_SIGNING_ALLOWED=NO above produced an entirely
+      # unsigned bundle. Ad-hoc signing ("-" identity) makes the error message
+      # downgrade to "unidentified developer" which the user can right-click → Open.
+      # For a fully trusted install you still need Developer ID + notarization.
+      - name: Ad-hoc sign app
+        working-directory: TokenTrackerBar
+        run: |
+          APP_PATH="$(find build/DerivedData/Build/Products/Release -name 'TokenTrackerBar.app' -maxdepth 1)"
+          echo "Signing: $APP_PATH"
+          # Sign nested Mach-O binaries first (inner-to-outer)
+          find "$APP_PATH/Contents/Resources/EmbeddedServer" -type f \
+            \( -name 'node' -o -name '*.dylib' -o -name '*.so' -o -name '*.node' \) \
+            -exec codesign --force --timestamp=none --sign - {} \;
+          # Sign the outer .app bundle with entitlements
+          codesign --force --deep --timestamp=none \
+            --entitlements TokenTrackerBar/TokenTrackerBar.entitlements \
+            --sign - "$APP_PATH"
+          # Verify
+          codesign --verify --verbose=2 "$APP_PATH"
+          codesign -dv --verbose=2 "$APP_PATH" 2>&1 | head -8
+
       # 5. Create DMG (uses Homebrew `create-dmg` for headless background + layout)
       - name: Install create-dmg
         run: brew install create-dmg

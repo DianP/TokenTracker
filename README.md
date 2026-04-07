@@ -32,6 +32,22 @@ Download `TokenTrackerBar.dmg` from the [latest release](https://github.com/mm78
   <img src="https://raw.githubusercontent.com/mm7894215/tokentracker/main/docs/screenshots/menubar.gif" alt="Menu Bar App" width="420" />
 </div>
 
+#### First launch: "TokenTrackerBar is damaged" or "cannot be opened"
+
+TokenTrackerBar is distributed **ad-hoc signed** (not notarized with an Apple Developer ID — that requires a paid account). When macOS downloads an ad-hoc signed app from the web, Gatekeeper may block it with a message like:
+
+> "TokenTrackerBar" is damaged and can't be opened. You should move it to the Trash.
+
+This is Gatekeeper's response to the `com.apple.quarantine` attribute macOS attaches to every downloaded file — not an actual problem with the app. Clear it once with:
+
+```bash
+xattr -cr /Applications/TokenTrackerBar.app
+```
+
+After that the app opens normally. You only need to do this once per download.
+
+If you still see a "cannot verify developer" dialog, right-click the app in Finder → **Open** → **Open** in the confirmation dialog. You only need to do this the first time.
+
 ### Option B: CLI + Web Dashboard
 
 ```bash
