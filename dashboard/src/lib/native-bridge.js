@@ -8,6 +8,43 @@
 
 const NATIVE_APP_KEY = "tokentracker_native_app";
 
+// Module-level cache for native system appearance.
+// An always-on listener (installed at module load) keeps this fresh,
+// so React components don't depend on lifecycle ordering to receive
+// `native:systemAppearanceChanged` events.
+let nativeSystemDark = null; // null = unknown, true/false = native push received
+const nativeSystemListeners = new Set();
+
+if (typeof window !== "undefined") {
+  window.addEventListener("native:systemAppearanceChanged", (event) => {
+    const d = event?.detail?.isDark;
+    if (typeof d !== "boolean") return;
+    nativeSystemDark = d;
+    // Defensive: also write .dark directly so the page reflects the change
+    // even before React re-renders. ThemeProvider's applyThemeToDOM will
+    // converge on the same value moments later.
+    try {
+      const root = document.documentElement;
+      if (d) root.classList.add("dark");
+      else root.classList.remove("dark");
+    } catch { /* ignore */ }
+    nativeSystemListeners.forEach((cb) => {
+      try { cb(d); } catch { /* ignore listener errors */ }
+    });
+  });
+}
+
+/** Latest system appearance pushed by native, or null if none yet. */
+export function getCachedNativeSystemDark() {
+  return nativeSystemDark;
+}
+
+/** Subscribe to native system appearance changes. Returns unsubscribe fn. */
+export function subscribeNativeSystemAppearance(callback) {
+  nativeSystemListeners.add(callback);
+  return () => nativeSystemListeners.delete(callback);
+}
+
 export function isNativeApp() {
   if (typeof window === "undefined") return false;
   try {
@@ -61,11 +98,20 @@ export function nativeAction(name) {
   return post({ type: "action", name });
 }
 
-/** macOS Dashboard 窗口：与 Web 的 resolvedTheme 同步 NSWindow.appearance，侧栏 NSVisualEffectView 才能跟暗色一致。 */
-export function syncNativeChromeAppearance(resolvedTheme) {
+export function requestNativeSystemAppearance() {
+  return post({ type: "getSystemAppearance" });
+}
+
+/**
+ * macOS Dashboard 窗口：与 Web 主题同步 NSWindow.appearance。
+ * `theme === "system"` 时原生侧将窗口 appearance 置为跟随系统；系统切换时再由原生推送 `native:systemAppearanceChanged`（WKWebView 内 matchMedia 常不刷新）。
+ * @param {"light" | "dark"} resolvedTheme
+ * @param {"light" | "dark" | "system"} theme
+ */
+export function syncNativeChromeAppearance(resolvedTheme, theme) {
   if (!isNativeEmbed()) return;
   const isDark = resolvedTheme === "dark";
-  post({ type: "setChromeAppearance", isDark });
+  post({ type: "setChromeAppearance", isDark, theme: theme ?? "system" });
 }
 
 /**

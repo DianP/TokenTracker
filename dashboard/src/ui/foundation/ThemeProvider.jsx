@@ -1,5 +1,11 @@
-import React, { createContext, useCallback, useEffect, useMemo, useState } from "react";
-import { syncNativeChromeAppearance } from "../../lib/native-bridge.js";
+import React, { createContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  getCachedNativeSystemDark,
+  isNativeEmbed,
+  requestNativeSystemAppearance,
+  subscribeNativeSystemAppearance,
+  syncNativeChromeAppearance,
+} from "../../lib/native-bridge.js";
 
 const THEME_STORAGE_KEY = "tokentracker-theme";
 
@@ -57,24 +63,64 @@ function applyThemeToDOM(resolvedTheme) {
  */
 export function ThemeProvider({ children }) {
   const [theme, setThemeState] = useState(getInitialTheme);
-  const [resolvedTheme, setResolvedTheme] = useState(() =>
-    theme === "system" ? getSystemTheme() : theme
-  );
+  const [resolvedTheme, setResolvedTheme] = useState(() => {
+    if (theme !== "system") return theme;
+    if (isNativeEmbed()) {
+      // 优先用原生缓存（模块加载时已挂上 always-on listener）
+      const cached = getCachedNativeSystemDark();
+      if (typeof cached === "boolean") return cached ? "dark" : "light";
+    }
+    return getSystemTheme();
+  });
+
+  const themeRef = useRef(theme);
+  useEffect(() => {
+    themeRef.current = theme;
+  }, [theme]);
 
   // Apply theme to DOM whenever resolvedTheme changes
   useEffect(() => {
     applyThemeToDOM(resolvedTheme);
   }, [resolvedTheme]);
 
-  // macOS WKWebView：侧栏毛玻璃 / 标题栏跟仪表盘亮暗一致（NSWindow.appearance）
-  useEffect(() => {
-    syncNativeChromeAppearance(resolvedTheme);
-  }, [resolvedTheme]);
+  // theme 切换时先同步 resolved（避免 native push 还没到时停留在旧值一帧）
+  useLayoutEffect(() => {
+    if (theme === "system") {
+      if (isNativeEmbed()) {
+        // 用模块级缓存立即得到当前系统外观；缓存空时再用 matchMedia 兜底
+        const cached = getCachedNativeSystemDark();
+        if (typeof cached === "boolean") {
+          setResolvedTheme(cached ? "dark" : "light");
+        } else {
+          // 不信 WKWebView 的 matchMedia（手动切过亮/暗后常驻 light），但作为兜底总比锁死旧值好
+          setResolvedTheme(getSystemTheme());
+        }
+        // 主动请求一次最新值以刷新缓存
+        requestNativeSystemAppearance();
+        return;
+      }
+      setResolvedTheme(getSystemTheme());
+    } else {
+      setResolvedTheme(theme);
+    }
+  }, [theme]);
 
-  // Listen to system theme changes when in "system" mode
+  // 始终订阅原生 system appearance（不依赖 theme），缓存随时更新；只有处于 system 模式时才反映到 React state
+  useEffect(() => {
+    if (!isNativeEmbed()) return;
+    const unsubscribe = subscribeNativeSystemAppearance((isDark) => {
+      if (themeRef.current === "system") {
+        setResolvedTheme(isDark ? "dark" : "light");
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  // 浏览器内用 matchMedia 跟系统；WKWebView 内不可靠（且与原生推送冲突），改由 Swift 侧推送
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (theme !== "system") return;
+    if (isNativeEmbed()) return;
 
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -93,14 +139,12 @@ export function ThemeProvider({ children }) {
     return () => mediaQuery.removeListener(handleChange);
   }, [theme]);
 
-  // Update resolvedTheme when theme changes
+  // macOS WKWebView：theme===system 时不要用 getSystemTheme() 作为 forNative（易为假 light），resolvedTheme 由原生事件维护
   useEffect(() => {
-    if (theme === "system") {
-      setResolvedTheme(getSystemTheme());
-    } else {
-      setResolvedTheme(theme);
-    }
-  }, [theme]);
+    const forNative =
+      theme === "system" && !isNativeEmbed() ? getSystemTheme() : resolvedTheme;
+    syncNativeChromeAppearance(forNative, theme);
+  }, [resolvedTheme, theme]);
 
   const setTheme = useCallback((newTheme) => {
     setThemeState(newTheme);

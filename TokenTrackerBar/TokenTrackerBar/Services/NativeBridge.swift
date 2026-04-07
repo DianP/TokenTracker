@@ -38,9 +38,14 @@ final class NativeBridge {
         switch type {
         case "getSettings":
             pushSettings()
+        case "getSystemAppearance":
+            DashboardWindowController.shared.pushCurrentSystemAppearanceToWeb()
         case "setChromeAppearance":
-            if let isDark = dict["isDark"] as? Bool {
-                DashboardWindowController.shared.applyChromeAppearance(isDark: isDark)
+            if let theme = dict["theme"] as? String {
+                let isDark = dict["isDark"] as? Bool ?? false
+                DashboardWindowController.shared.applyChromeAppearance(theme: theme, resolvedIsDark: isDark)
+            } else if let isDark = dict["isDark"] as? Bool {
+                DashboardWindowController.shared.applyChromeAppearance(theme: isDark ? "dark" : "light", resolvedIsDark: isDark)
             }
         case "setSetting":
             if let key = dict["key"] as? String {
