@@ -1,4 +1,4 @@
-<div align="center">
+ <div align="center">
 
 # Token Tracker
 
@@ -26,11 +26,18 @@ Auto-collect token counts from **8 AI coding tools**, aggregate them locally, an
 
 ## ⚡ Quick Start
 
+> **Requirements**: Node.js **20+** (CLI runs on macOS / Linux / Windows; menu bar app and Cursor SQLite reader are macOS-only).
+
 ```bash
 npx tokentracker-cli
 ```
 
 That's it. First run installs hooks, syncs your data, and opens the dashboard at `http://localhost:7680`.
+
+**What you get in 30 seconds:**
+- 📊 A local dashboard at `localhost:7680` with usage trends, model breakdown, cost analysis
+- 🔌 Auto-detected hooks for every supported AI tool you have installed
+- 🏠 100% local — no account, no API keys, no network calls (except optional leaderboard)
 
 > **Want a native macOS menu bar app?** [Download `TokenTrackerBar.dmg`](https://github.com/mm7894215/TokenTracker/releases/latest) → drag to Applications. Includes desktop widgets, menu bar status icon, and the same dashboard in a WKWebView.
 
@@ -120,17 +127,13 @@ Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/iss
 
 ## 🆚 Why TokenTracker?
 
-|                              | **TokenTracker**           | ccusage      | Cursor stats   | Native CLI dashboards |
-|------------------------------|----------------------------|--------------|----------------|------------------------|
-| **AI tools supported**       | **8** (multi-tool)         | 1 (Claude)   | 1 (Cursor)     | 1 each                 |
-| **Local-first, no account**  | ✅                          | ✅            | ❌ requires login | varies              |
-| **Native macOS menu bar**    | ✅                          | ❌            | ❌              | ❌                      |
-| **Desktop widgets**          | ✅ 4 widgets                | ❌            | ❌              | ❌                      |
-| **Rate-limit tracking**      | ✅ 6 providers              | ❌            | Cursor only    | ❌                      |
-| **Cost breakdown**           | ✅ 70+ models               | Claude only  | Cursor only    | varies                 |
-| **Activity heatmap**         | ✅                          | ❌            | ❌              | ❌                      |
-| **Project attribution**      | ✅                          | ❌            | ❌              | ❌                      |
-| **License**                  | MIT (free)                 | MIT (free)   | proprietary    | varies                 |
+|                          | **TokenTracker** | ccusage     | Cursor stats |
+|--------------------------|:---:|:---:|:---:|
+| **AI tools supported**   | **8**            | 1 (Claude)  | 1 (Cursor)   |
+| **Local-first, no account** | ✅            | ✅           | ❌            |
+| **Native menu bar app**  | ✅                | ❌           | ❌            |
+| **Desktop widgets**      | ✅ 4 widgets      | ❌           | ❌            |
+| **Rate-limit tracking**  | ✅ 6 providers    | ❌           | Cursor only  |
 
 ---
 
@@ -212,12 +215,84 @@ Requires **Xcode 16+** and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ## 🔧 Troubleshooting
 
+### CLI
+
 <details>
-<summary><b>macOS: "TokenTrackerBar can't be opened" — unidentified developer</b></summary>
+<summary><b>"engines.node" or unsupported version error</b></summary>
 
 <br/>
 
-TokenTrackerBar is **ad-hoc signed** (not notarized with an Apple Developer ID — that requires a paid developer account). Gatekeeper blocks it on first launch with a friendly-looking but unhelpful dialog.
+TokenTracker requires **Node 20+**. Check your version:
+
+```bash
+node --version
+```
+
+If lower, upgrade via [nvm](https://github.com/nvm-sh/nvm), [fnm](https://github.com/Schniz/fnm), or your package manager (`brew upgrade node`, `apt install nodejs`).
+
+</details>
+
+<details>
+<summary><b>Port 7680 already in use</b></summary>
+
+<br/>
+
+The dashboard server picks the next free port automatically (`7681`, `7682`, ...) when `7680` is taken. The actual port is logged on startup. If you want to force a specific port:
+
+```bash
+PORT=7700 tokentracker serve
+```
+
+To find what's holding `7680`:
+
+```bash
+lsof -i :7680
+```
+
+</details>
+
+<details>
+<summary><b>A provider isn't being detected</b></summary>
+
+<br/>
+
+Check the integration status:
+
+```bash
+tokentracker status
+```
+
+Then run the doctor for a deeper health check:
+
+```bash
+tokentracker doctor
+```
+
+If a provider shows as not configured even though you use it, try `tokentracker activate-if-needed` to re-run hook detection. If still missing, [open an issue](https://github.com/mm7894215/TokenTracker/issues/new) with the `doctor` output attached.
+
+</details>
+
+<details>
+<summary><b>How to uninstall hooks and remove all config</b></summary>
+
+<br/>
+
+```bash
+tokentracker uninstall
+```
+
+This removes every hook TokenTracker installed across all detected AI tools, plus the local config and data. Safe to re-run.
+
+</details>
+
+### macOS App
+
+<details>
+<summary><b>"TokenTrackerBar can't be opened" — unidentified developer</b></summary>
+
+<br/>
+
+TokenTrackerBar is **ad-hoc signed** (not notarized with an Apple Developer ID — that requires a paid developer account). Gatekeeper blocks it on first launch.
 
 1. Open **System Settings → Privacy & Security**
 2. Scroll to the **Security** section — you'll see *"TokenTrackerBar was blocked to protect your Mac."*
@@ -229,7 +304,7 @@ You only need to do this once. Older macOS alternative: right-click the app in F
 </details>
 
 <details>
-<summary><b>macOS: "TokenTrackerBar is damaged and can't be opened"</b></summary>
+<summary><b>"TokenTrackerBar is damaged and can't be opened"</b></summary>
 
 <br/>
 
@@ -239,18 +314,19 @@ This is Gatekeeper reacting to the `com.apple.quarantine` attribute macOS attach
 xattr -cr /Applications/TokenTrackerBar.app
 ```
 
-After that the app opens normally. You only need to do this once per download.
+After that the app opens normally.
 
 </details>
 
 <details>
-<summary><b>macOS privacy prompts on first launch</b></summary>
+<summary><b>"TokenTrackerBar wants to access data from other apps"</b></summary>
 
 <br/>
 
-You may see one or both of these prompts the first time you run TokenTrackerBar:
+This is required for the **Cursor** and **Kiro** integrations. They store auth tokens / usage data inside their own `~/Library/Application Support/` folders, which macOS protects with the App Management permission.
 
-- **"TokenTrackerBar wants to access data from other apps"** — This is required for the **Cursor** and **Kiro** integrations. They store auth tokens / usage data inside their own `~/Library/Application Support/` folders, which macOS protects with the App Management permission. Click **Allow** to grant. If you don't use Cursor or Kiro, click **Don't Allow** — those providers will be silently skipped, all others continue working.
+- ✅ Click **Allow** if you use Cursor or Kiro
+- ❌ Click **Don't Allow** if you don't — those providers will be silently skipped, everything else keeps working
 
 Once granted, the permission is remembered. Note that ad-hoc signed builds re-prompt after each upgrade because each build has a new signing identity.
 
@@ -265,6 +341,13 @@ Once granted, the permission is remembered. Note that ad-hoc signed builds re-pr
 </a>
 
 ---
+
+## 🤝 Contributing & Support
+
+- **Bugs / feature requests**: [open an issue](https://github.com/mm7894215/TokenTracker/issues/new)
+- **Security**: see [SECURITY.md](SECURITY.md) — please don't open public issues for security reports
+- **Pull requests**: see [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests, and how to add a new AI tool integration
+- **Questions / showcase**: [GitHub Discussions](https://github.com/mm7894215/TokenTracker/discussions)
 
 ## 🙏 Credits
 
