@@ -52,6 +52,23 @@ tokentracker status       # Check hook status
 tokentracker doctor       # Health check
 ```
 
+### 🍺 Homebrew (macOS)
+
+Prefer `brew`? The official tap ships both the CLI formula and the menu bar app cask:
+
+```bash
+# One-time tap (fetches cask + formula metadata)
+brew tap mm7894215/tokentracker
+
+# macOS menu bar app (DMG)
+brew install --cask tokentracker
+
+# CLI only
+brew install tokentracker
+```
+
+Upgrade with `brew upgrade --cask tokentracker` / `brew upgrade tokentracker`. The tap auto-bumps within an hour of every new release.
+
 ---
 
 ## ✨ Features
