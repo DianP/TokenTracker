@@ -1,5 +1,23 @@
 /**
- * InsForge Edge：排行榜列表。「当前用户」行用 fetch /api/auth/sessions/current 解析 user id，避免 Deno 内 SDK getCurrentUser 不稳定。
+ * InsForge Edge: public leaderboard list.
+ *
+ * IMPORTANT — why no Authorization header is read here:
+ * InsForge's platform gateway validates any incoming `Authorization: Bearer ...`
+ * against the service JWT secret *before* this function runs. Any token problem
+ * (bad signature, expired, wrong issuer, stale after key rotation) is surfaced
+ * as an opaque HTTP 500 JWSError instead of a proper 401. That blew up the
+ * Leaderboard for real users whose stored access_token drifted (GitHub issue #6
+ * / Linear 001-51).
+ *
+ * Fix: this endpoint is now purely public. The client passes its own `user_id`
+ * as a query parameter (already known from the Insforge auth context) to get
+ * `is_me` highlighting. The function never touches the Authorization header,
+ * so no JWT validation path can ever fire for Leaderboard reads.
+ *
+ * Security note: `user_id` from the query is only used for row-highlight. All
+ * leaderboard entries are public data in `tokentracker_leaderboard_snapshots`,
+ * so spoofing `user_id` at worst re-highlights a different row — no PII or
+ * private data is exposed.
  */
 import { createClient } from "npm:@insforge/sdk";
 
@@ -16,28 +34,23 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function extractUserIdFromSessionBody(body: unknown): string | null {
-  if (!body || typeof body !== "object") return null;
-  const o = body as Record<string, unknown>;
-  const u =
-    (o.user as Record<string, unknown> | undefined) ??
-    ((o.data as Record<string, unknown> | undefined)?.user as Record<string, unknown> | undefined);
-  if (!u || typeof u !== "object") return null;
-  const id = u.id ?? u.user_id;
-  return typeof id === "string" && id.length > 0 ? id : null;
-}
-
-function userIdFromAccessTokenJwt(token: string): string | null {
+/**
+ * Decode (without verifying) the `sub` claim from a JWT. Pure back-compat
+ * fallback so v0.5.46 clients that still send an Authorization header
+ * (instead of the new `user_id` query param) still get `is_me` highlighting.
+ * Signature is NOT verified — the value is only used for cosmetic row
+ * highlighting on public data, never for authorization.
+ */
+function unsafeDecodeJwtSub(token: string): string | null {
   try {
     const parts = token.split(".");
     if (parts.length < 2) return null;
-    const payloadPart = parts[1];
-    const padded = payloadPart
+    const p = parts[1];
+    const padded = p
       .replace(/-/g, "+")
       .replace(/_/g, "/")
-      .padEnd(payloadPart.length + ((4 - (payloadPart.length % 4)) % 4), "=");
-    const json = atob(padded);
-    const payload = JSON.parse(json) as Record<string, unknown>;
+      .padEnd(p.length + ((4 - (p.length % 4)) % 4), "=");
+    const payload = JSON.parse(atob(padded)) as Record<string, unknown>;
     const sub = payload.sub;
     if (typeof sub === "string" && sub.length > 0) return sub;
     const uid = payload.user_id;
@@ -48,48 +61,40 @@ function userIdFromAccessTokenJwt(token: string): string | null {
   return null;
 }
 
-async function getUserIdFromSession(
-  baseUrl: string,
-  token: string,
-  anonKey: string | undefined,
-): Promise<string | null> {
-  const root = baseUrl.replace(/\/$/, "");
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/json",
-  };
-  if (anonKey) headers.apikey = anonKey;
-  const res = await fetch(`${root}/api/auth/sessions/current`, { headers });
-  if (res.ok) {
-    const body = await res.json().catch(() => null);
-    const fromApi = extractUserIdFromSessionBody(body);
-    if (fromApi) return fromApi;
-  }
-  return userIdFromAccessTokenJwt(token);
-}
-
 export default async function (req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   const url = new URL(req.url);
   const period = url.searchParams.get("period") || "week";
   const limit = Math.min(parseInt(url.searchParams.get("limit") || "20") || 20, 100);
   const offset = parseInt(url.searchParams.get("offset") || "0") || 0;
+  // Preferred path: client passes user_id as a query param (v0.5.51+).
+  // Fallback: v0.5.46 clients still send a Bearer token — decode its sub
+  // claim (WITHOUT signature verification) so they keep seeing is_me
+  // highlighting. Signature validation is unnecessary because sub is only
+  // used to pick which public row to highlight.
+  let requestedUserId =
+    url.searchParams.get("user_id") || url.searchParams.get("userId") || null;
+  if (!requestedUserId) {
+    const authH = req.headers.get("Authorization");
+    const token = authH?.startsWith("Bearer ") ? authH.slice(7) : null;
+    if (token) requestedUserId = unsafeDecodeJwtSub(token);
+  }
+
   const baseUrl = Deno.env.get("INSFORGE_BASE_URL")!;
   const incomingApiKey =
     req.headers.get("apikey") ?? req.headers.get("Apikey") ?? req.headers.get("x-api-key") ?? undefined;
   const anonKey =
     Deno.env.get("INSFORGE_ANON_KEY") ?? Deno.env.get("ANON_KEY") ?? incomingApiKey ?? undefined;
-  const authH = req.headers.get("Authorization");
-  const token = authH?.startsWith("Bearer ") ? authH.slice(7) : undefined;
   const serviceRoleKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
-  // 优先用 service role key 查询 DB，避免用户短期 JWT 过期导致 401
-  const dbToken = serviceRoleKey || token;
+  // Always use service role (never the caller's token) so a stale/broken
+  // caller token can't cascade into a 500 on the DB query.
   const client = createClient({
     baseUrl,
-    edgeFunctionToken: dbToken,
+    edgeFunctionToken: serviceRoleKey,
     anonKey,
     ...(anonKey ? { headers: { apikey: anonKey } } : {}),
   });
+
   const now = new Date();
   let from_day: string;
   let to_day: string;
@@ -106,6 +111,7 @@ export default async function (req: Request): Promise<Response> {
     from_day = "2024-01-01";
     to_day = now.toISOString().slice(0, 10);
   }
+
   const {
     data: entries,
     error,
@@ -119,26 +125,25 @@ export default async function (req: Request): Promise<Response> {
     .order("rank", { ascending: true })
     .range(offset, offset + limit - 1);
   if (error) return json({ error: error.message }, 500);
+
   let me: unknown = null;
-  if (token) {
+  if (requestedUserId) {
     try {
-      const uid = await getUserIdFromSession(baseUrl, token, anonKey);
-      if (uid) {
-        const { data: mr } = await client.database
-          .from("tokentracker_leaderboard_snapshots")
-          .select("*")
-          .eq("period", period)
-          .eq("from_day", from_day)
-          .eq("to_day", to_day)
-          .eq("user_id", uid)
-          .limit(1)
-          .maybeSingle();
-        if (mr) me = mr;
-      }
+      const { data: mr } = await client.database
+        .from("tokentracker_leaderboard_snapshots")
+        .select("*")
+        .eq("period", period)
+        .eq("from_day", from_day)
+        .eq("to_day", to_day)
+        .eq("user_id", requestedUserId)
+        .limit(1)
+        .maybeSingle();
+      if (mr) me = mr;
     } catch {
       /* ignore */
     }
   }
+
   return json({
     entries: (entries || []).map((e: { user_id?: string }) => ({
       ...e,

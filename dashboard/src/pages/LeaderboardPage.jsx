@@ -127,7 +127,7 @@ export function LeaderboardPage({
   const location = useLocation();
   const navigate = useNavigate();
   const { openLoginModal } = useLoginModal();
-  const { signedIn: cloudSignedIn, loading: authLoading } = useInsforgeAuth();
+  const { signedIn: cloudSignedIn, loading: authLoading, user: cloudUser } = useInsforgeAuth();
   const leaderboardBaseUrl = useMemo(() => getLeaderboardBaseUrl(), []);
   const mockEnabled = isMockEnabled();
   const authTokenAllowed = signedIn && !sessionSoftExpired;
@@ -183,13 +183,6 @@ export function LeaderboardPage({
     setListPage(1);
   }, [period]);
 
-  useEffect(() => {
-    if (mockEnabled) return;
-    if (!authTokenAllowed) return;
-    if (authTokenReady) return;
-    setListState({ loading: false, error: null, data: null });
-  }, [authTokenAllowed, authTokenReady, mockEnabled]);
-
   const listOffset = useMemo(() => {
     const safePage = clampInt(listPage, { min: 1, max: 1_000_000, fallback: 1 });
     return (safePage - 1) * PAGE_LIMIT;
@@ -198,16 +191,12 @@ export function LeaderboardPage({
   useEffect(() => {
     // Mock leaderboard uses local getMockLeaderboard(); real data needs InsForge URL from getLeaderboardBaseUrl().
     if (!leaderboardBaseUrl && !mockEnabled) return;
-    if (!mockEnabled && authTokenAllowed && !authTokenReady) return;
     let active = true;
     setListState((prev) => ({ ...prev, loading: true, error: null }));
     (async () => {
-      const token = authTokenAllowed
-        ? await resolveAuthAccessTokenWithRetry(effectiveAuthToken)
-        : null;
       const data = await getLeaderboard({
         baseUrl: leaderboardBaseUrl,
-        accessToken: token,
+        userId: cloudUser?.id || null,
         period,
         limit: PAGE_LIMIT,
         offset: listOffset,
@@ -223,9 +212,7 @@ export function LeaderboardPage({
     };
   }, [
     leaderboardBaseUrl,
-    effectiveAuthToken,
-    authTokenAllowed,
-    authTokenReady,
+    cloudUser?.id,
     listOffset,
     listReloadToken,
     mockEnabled,

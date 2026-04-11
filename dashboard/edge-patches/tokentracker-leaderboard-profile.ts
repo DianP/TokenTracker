@@ -14,12 +14,18 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function getClient(req: Request) {
-  const authHeader = req.headers.get("Authorization");
-  const token = authHeader?.replace("Bearer ", "") || undefined;
+function getClient(_req: Request) {
+  // Public endpoint: snapshots are public data. Use the service role key
+  // (or fall through to anon) so the caller's Authorization header — which
+  // may be stale/malformed/rotated — never feeds the InsForge gateway's
+  // JWT validator. A bad caller token previously cascaded into HTTP 500
+  // JWSError (see Linear 001-51 / GitHub #6).
+  const serviceRoleKey = Deno.env.get("INSFORGE_SERVICE_ROLE_KEY");
+  const anonKey = Deno.env.get("INSFORGE_ANON_KEY") ?? Deno.env.get("ANON_KEY");
   return createClient({
     baseUrl: Deno.env.get("INSFORGE_BASE_URL")!,
-    edgeFunctionToken: token,
+    edgeFunctionToken: serviceRoleKey,
+    anonKey: anonKey ?? undefined,
     isServerMode: true,
   });
 }
