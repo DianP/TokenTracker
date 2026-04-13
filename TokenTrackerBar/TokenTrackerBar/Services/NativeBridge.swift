@@ -55,6 +55,8 @@ final class NativeBridge {
             if let name = dict["name"] as? String {
                 if name == "saveImageToDownloads" {
                     saveImageToDownloads(payload: dict)
+                } else if name == "copyImageToClipboard" {
+                    copyImageToClipboard(payload: dict)
                 } else if name == "openURL", let urlStr = dict["value"] as? String,
                           let url = URL(string: urlStr) {
                     NSWorkspace.shared.open(url)
@@ -171,6 +173,44 @@ final class NativeBridge {
         default:
             break
         }
+    }
+
+    // MARK: - Clipboard image copy
+
+    private func copyImageToClipboard(payload: [String: Any]) {
+        let requestId = (payload["requestId"] as? String) ?? ""
+        guard let dataUrl = payload["dataUrl"] as? String else {
+            postCopyImageResult(requestId: requestId, ok: false, error: "missing dataUrl")
+            return
+        }
+        guard let commaIdx = dataUrl.firstIndex(of: ",") else {
+            postCopyImageResult(requestId: requestId, ok: false, error: "invalid data URL")
+            return
+        }
+        let base64 = String(dataUrl[dataUrl.index(after: commaIdx)...])
+        guard let imageData = Data(base64Encoded: base64, options: .ignoreUnknownCharacters),
+              let image = NSImage(data: imageData) else {
+            postCopyImageResult(requestId: requestId, ok: false, error: "decode failed")
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+        postCopyImageResult(requestId: requestId, ok: true, error: nil)
+    }
+
+    private func postCopyImageResult(requestId: String, ok: Bool, error: String?) {
+        var detail: [String: Any] = [
+            "requestId": requestId,
+            "ok": ok,
+        ]
+        if let error { detail["error"] = error }
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: detail, options: []),
+            let json = String(data: data, encoding: .utf8)
+        else { return }
+        let js = "window.dispatchEvent(new CustomEvent('native:copyImageResult', { detail: \(json) }));"
+        webView?.evaluateJavaScript(js, completionHandler: nil)
     }
 
     // MARK: - Image saving

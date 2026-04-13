@@ -4,6 +4,7 @@ import { copy } from "../../lib/copy";
 import { safeWriteClipboardImage } from "../../lib/safe-browser";
 import {
   saveShareImageToDownloads,
+  copyShareImageToClipboard,
   type SaveImageResult,
 } from "./native-save";
 import {
@@ -110,7 +111,16 @@ export function ShareModal({ open, onClose, data, twitterText }: any) {
       setBusy(null);
       return;
     }
-    const ok = await safeWriteClipboardImage(blob);
+    let ok = false;
+    if (isNativeEmbed()) {
+      const dataUrl = await blobToPngDataUrl(blob);
+      if (dataUrl) {
+        const result = await copyShareImageToClipboard(dataUrl);
+        ok = result.ok;
+      }
+    } else {
+      ok = await safeWriteClipboardImage(blob);
+    }
     push(ok ? copy("share.toast.copied") : copy("share.toast.failed"), ok ? "success" : "error");
     setBusy(null);
   }, [busy, ensureCardBlob, push]);
