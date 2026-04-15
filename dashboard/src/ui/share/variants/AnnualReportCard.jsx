@@ -155,7 +155,7 @@ export function AnnualReportCard({ data }) {
   return (
     <div style={{width:"100%",height:"100%",background:BG,fontFamily:F,position:"relative",overflow:"hidden",boxSizing:"border-box"}}>
       {/* ── Background image ── */}
-      <img src={bgUrl||"/neon_bg.png"} alt="" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",pointerEvents:"none"}} crossOrigin="anonymous"/>
+      <img src={bgUrl||"/neon_bg.png"} alt="" style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover",pointerEvents:"none"}}/>
 
       <div style={{position:"relative",zIndex:1,display:"flex",flexDirection:"column",height:"100%",padding:PAD,boxSizing:"border-box"}}>
 
