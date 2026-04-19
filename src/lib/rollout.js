@@ -2651,6 +2651,16 @@ function readKiroDbTokens(dbPath, sinceId) {
 // The fallback file does not include per-row timestamps, so newly appended rows are
 // bucketed using the file mtime observed during this sync. We track a separate JSONL
 // cursor so it never shares state with the SQLite path.
+function countKiroJsonlLines(jsonlPath) {
+  if (!jsonlPath || !fssync.existsSync(jsonlPath)) return 0;
+  try {
+    const raw = fssync.readFileSync(jsonlPath, "utf8");
+    return raw.split("\n").filter((l) => l.trim()).length;
+  } catch (_e) {
+    return 0;
+  }
+}
+
 function readKiroJsonlTokens(jsonlPath, sinceLineIndex) {
   if (!jsonlPath || !fssync.existsSync(jsonlPath)) {
     return { rows: [], lineCount: 0, reset: false };
@@ -2795,6 +2805,14 @@ async function parseKiroIncremental({ dbPath, jsonlPath, cursors, queuePath, onP
   if (fssync.existsSync(resolvedDbPath)) {
     rows = readKiroDbTokens(resolvedDbPath, lastDbId);
     usingDb = true;
+    // DB and JSONL are siblings for the same usage events. If the DB ever
+    // disappears (corrupted / wiped) and we fall back to JSONL in a later
+    // run, we must not re-read lines that the DB path already consumed.
+    // Advance the JSONL line cursor to the current file tail.
+    if (fssync.existsSync(resolvedJsonlPath)) {
+      const tailLineCount = countKiroJsonlLines(resolvedJsonlPath);
+      if (tailLineCount > nextJsonlLine) nextJsonlLine = tailLineCount;
+    }
   } else if (fssync.existsSync(resolvedJsonlPath)) {
     const jsonlResult = readKiroJsonlTokens(resolvedJsonlPath, lastJsonlLine);
     rows = jsonlResult.rows;
