@@ -16,7 +16,13 @@ const {
   parseKimiIncremental,
 } = require("../src/lib/rollout");
 
-test("parseRolloutIncremental skips duplicate token_count records (unchanged total_token_usage)", async () => {
+test("parseRolloutIncremental aggregates repeated token_count records without deduping (matches ccusage)", async () => {
+  // B-plan audit alignment: when a Codex rollout emits the SAME token_count
+  // event twice (same last_token_usage + same total_token_usage), ccusage
+  // adds the last_token_usage delta a second time. We follow that convention
+  // so cost numbers line up with ccusage's per-day totals. The risk is
+  // slight over-counting on genuinely duplicated events, which the audit
+  // showed is small vs. the risk of under-counting seen under our old guard.
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-rollout-"));
   try {
     const rolloutPath = path.join(tmp, "rollout-test.jsonl");
@@ -49,24 +55,25 @@ test("parseRolloutIncremental skips duplicate token_count records (unchanged tot
 
     const lines = [
       buildTokenCountLine({ ts: "2025-12-17T00:00:00.000Z", last: usage1, total: totals1 }),
-      buildTokenCountLine({ ts: "2025-12-17T00:00:01.000Z", last: usage1, total: totals1 }), // duplicate
+      buildTokenCountLine({ ts: "2025-12-17T00:00:01.000Z", last: usage1, total: totals1 }), // duplicate — counted again
       buildTokenCountLine({ ts: "2025-12-17T00:00:02.000Z", last: usage2, total: totals2 }),
-      buildTokenCountLine({ ts: "2025-12-17T00:00:03.000Z", last: usage2, total: totals2 }), // duplicate
+      buildTokenCountLine({ ts: "2025-12-17T00:00:03.000Z", last: usage2, total: totals2 }), // duplicate — counted again
     ];
 
     await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
 
     const res = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
     assert.equal(res.filesProcessed, 1);
-    assert.equal(res.eventsAggregated, 2);
+    assert.equal(res.eventsAggregated, 4);
     assert.equal(res.bucketsQueued, 1);
 
     const queued = await readJsonLines(queuePath);
     assert.equal(queued.length, 1);
     assert.equal(queued[0].model, "unknown");
+    // Two originals + two duplicates each contribute their last_token_usage.
     assert.equal(
       queued.reduce((sum, ev) => sum + Number(ev.total_tokens || 0), 0),
-      usage1.total_tokens + usage2.total_tokens,
+      2 * (usage1.total_tokens + usage2.total_tokens),
     );
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
@@ -127,7 +134,12 @@ test("parseRolloutIncremental emits project usage buckets with canonicalized pro
     assert.equal(projectQueued[0].project_key, "acme/alpha");
     assert.equal(projectQueued[0].source, "codex");
     assert.equal(projectQueued[0].hour_start, "2025-12-17T00:00:00.000Z");
-    assert.equal(projectQueued[0].input_tokens, usage.input_tokens);
+    // Codex reports input_tokens inclusive of cached; the parser subtracts
+    // cached so the stored value is pure non-cached input.
+    assert.equal(
+      projectQueued[0].input_tokens,
+      usage.input_tokens - usage.cached_input_tokens,
+    );
     assert.equal(projectQueued[0].cached_input_tokens, usage.cached_input_tokens);
     assert.equal(projectQueued[0].output_tokens, usage.output_tokens);
     assert.equal(projectQueued[0].reasoning_output_tokens, usage.reasoning_output_tokens);
@@ -611,21 +623,22 @@ test("parseRolloutIncremental handles total_token_usage reset by counting last_t
       buildTokenCountLine({ ts: "2025-12-17T00:00:00.000Z", last: usageA, total: totalsA }),
       buildTokenCountLine({ ts: "2025-12-17T00:00:01.000Z", last: usageB, total: totalsB }),
       buildTokenCountLine({ ts: "2025-12-17T00:00:02.000Z", last: usageReset, total: totalsReset }),
-      buildTokenCountLine({ ts: "2025-12-17T00:00:03.000Z", last: usageReset, total: totalsReset }), // duplicate after reset
+      buildTokenCountLine({ ts: "2025-12-17T00:00:03.000Z", last: usageReset, total: totalsReset }), // duplicate after reset — now counted (B-plan ccusage alignment)
     ];
 
     await fs.writeFile(rolloutPath, lines.join("\n") + "\n", "utf8");
 
     const res = await parseRolloutIncremental({ rolloutFiles: [rolloutPath], cursors, queuePath });
     assert.equal(res.filesProcessed, 1);
-    assert.equal(res.eventsAggregated, 3);
+    assert.equal(res.eventsAggregated, 4);
     assert.equal(res.bucketsQueued, 1);
 
     const queued = await readJsonLines(queuePath);
     assert.equal(queued.length, 1);
+    // A + B + Reset + Reset (duplicate after reset is no longer deduped).
     assert.equal(
       queued.reduce((sum, ev) => sum + Number(ev.total_tokens || 0), 0),
-      usageA.total_tokens + usageB.total_tokens + usageReset.total_tokens,
+      usageA.total_tokens + usageB.total_tokens + 2 * usageReset.total_tokens,
     );
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
@@ -1162,6 +1175,56 @@ test("parseOpencodeIncremental preserves legacy file totals when opencode index 
   }
 });
 
+test("parseRolloutIncremental subtracts cached_input_tokens from Codex input_tokens to match our schema", async () => {
+  // Regression guard for the ~6-7x leaderboard cost inflation caused by
+  // treating Codex's inclusive-of-cached `input_tokens` as pure non-cached
+  // input. Anchors the numbers against a realistic cache-heavy session
+  // (95% cache hit) like the ones flagged in production.
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-codex-cached-"));
+  try {
+    const rolloutPath = path.join(tmp, "rollout-codex.jsonl");
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    // Shape mirrors a real codex rollout `token_count` event: input_tokens
+    // is the TOTAL prompt (1_000_000), of which 950_000 is cache-read. The
+    // Codex-native total_tokens invariant is input + output (= 1_010_000),
+    // which also happens to equal our schema's non_cached + cached + output.
+    const usage = {
+      input_tokens: 1_000_000,
+      cached_input_tokens: 950_000,
+      output_tokens: 10_000,
+      reasoning_output_tokens: 4_000,
+      total_tokens: 1_010_000,
+    };
+
+    await fs.writeFile(
+      rolloutPath,
+      buildTokenCountLine({ ts: "2026-04-20T00:10:00.000Z", last: usage, total: usage }) + "\n",
+      "utf8",
+    );
+
+    await parseRolloutIncremental({
+      rolloutFiles: [{ path: rolloutPath, source: "codex" }],
+      cursors,
+      queuePath,
+    });
+
+    const queued = await readJsonLines(queuePath);
+    assert.equal(queued.length, 1);
+    // Pure non-cached input = 1_000_000 - 950_000 = 50_000.
+    assert.equal(queued[0].input_tokens, 50_000);
+    assert.equal(queued[0].cached_input_tokens, 950_000);
+    assert.equal(queued[0].output_tokens, 10_000);
+    assert.equal(queued[0].reasoning_output_tokens, 4_000);
+    // total_tokens left as reported: still equals non_cached + cached + output
+    // numerically, so downstream aggregation stays stable.
+    assert.equal(queued[0].total_tokens, 1_010_000);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseRolloutIncremental handles Every Code token_count envelope", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "vibescore-rollout-"));
   try {
@@ -1528,7 +1591,10 @@ test("parseRolloutIncremental breaks ties by earlier codex bucket", async () => 
       cursors,
       queuePath,
     });
-    assert.equal(res.bucketsQueued, 2);
+    // Two codex buckets (gpt-4o @00:00, gpt-4o-mini @01:00) + one every-code
+    // bucket that aligns to the earlier gpt-4o tie. Under the old sameUsage
+    // guard the second codex event was de-duped, yielding 2.
+    assert.equal(res.bucketsQueued, 3);
 
     const queued = await readJsonLines(queuePath);
     const bySource = new Map(queued.map((row) => [row.source, row]));

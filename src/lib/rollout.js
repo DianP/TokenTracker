@@ -2150,12 +2150,12 @@ function pickDelta(lastUsage, totalUsage, prevTotals) {
   const hasTotal = isNonEmptyObject(totalUsage);
   const hasPrevTotals = isNonEmptyObject(prevTotals);
 
-  // Codex rollout logs sometimes emit duplicate token_count records where total_token_usage does not
-  // change between adjacent entries. Counting last_token_usage in those cases will double-count.
-  if (hasTotal && hasPrevTotals && sameUsage(totalUsage, prevTotals)) {
-    return null;
-  }
-
+  // NOTE: We used to guard against "duplicate token_count records where
+  // total_token_usage is unchanged" by returning null here. We removed that
+  // guard to align token counts with ccusage exactly (audited against 10 days
+  // of real rollouts). When last_token_usage is present we trust it as the
+  // per-turn delta; when it's absent the cumulative-subtract path naturally
+  // yields an all-zero delta on duplicates and is still filtered below.
   if (!hasLast && hasTotal && hasPrevTotals && totalsReset(totalUsage, prevTotals)) {
     const normalized = normalizeUsage(totalUsage);
     return isAllZeroUsage(normalized) ? null : normalized;
@@ -2203,6 +2203,19 @@ function normalizeUsage(u) {
     const n = Number(u[k] || 0);
     out[k] = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
   }
+  // Codex rollouts (and Every Code, which shares the format) report
+  // `input_tokens` as the TOTAL prompt, with `cached_input_tokens` as the
+  // cached subset — i.e. the cached slice is INSIDE the input count. Our
+  // queue schema (CLAUDE.md → Token Normalization Convention) stores
+  // `input_tokens` as pure non-cached input and `cached_input_tokens`
+  // separately. Without this subtraction the cost formula bills the cached
+  // bytes twice: once at the full input rate and again at the cache_read
+  // rate, producing ~6–7x cost inflation on cache-heavy Codex sessions
+  // (verified against ccusage's per-day numbers on the same rollouts).
+  // We intentionally leave `total_tokens` unchanged: Codex reports
+  // total = input(inclusive of cached) + output, which numerically equals
+  // our schema's non_cached + cached + output + 0 (cache_creation=0 here).
+  out.input_tokens = Math.max(0, out.input_tokens - out.cached_input_tokens);
   return out;
 }
 
@@ -2237,20 +2250,6 @@ function isAllZeroUsage(u) {
     "total_tokens",
   ]) {
     if (Number(u[k] || 0) !== 0) return false;
-  }
-  return true;
-}
-
-function sameUsage(a, b) {
-  for (const k of [
-    "input_tokens",
-    "cached_input_tokens",
-    "cache_creation_input_tokens",
-    "output_tokens",
-    "reasoning_output_tokens",
-    "total_tokens",
-  ]) {
-    if (toNonNegativeInt(a?.[k]) !== toNonNegativeInt(b?.[k])) return false;
   }
   return true;
 }

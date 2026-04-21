@@ -112,12 +112,21 @@ function getModelPricing(model: string) {
 
 function computeRowCost(row: HourlyRow): number {
   const p = getModelPricing(row.model);
+  // For Codex-family rollouts, `output_tokens` already includes any reasoning
+  // tokens (OpenAI API convention), so `reasoning_output_tokens * output_rate`
+  // would double-charge the reasoning slice. Kept explicit for other sources
+  // where reasoning is NOT guaranteed to be folded into output_tokens.
+  // Must stay in lockstep with local-api.js:computeRowCost.
+  const reasoningIncludedInOutput = row.source === "codex" || row.source === "every-code";
+  const reasoningCost = reasoningIncludedInOutput
+    ? 0
+    : (row.reasoning_output_tokens || 0) * (p.output || 0);
   return (
     ((row.input_tokens || 0) * (p.input || 0) +
       (row.output_tokens || 0) * (p.output || 0) +
       (row.cached_input_tokens || 0) * (p.cache_read || 0) +
       (row.cache_creation_input_tokens || 0) * (p.cache_write || 0) +
-      (row.reasoning_output_tokens || 0) * (p.output || 0)) /
+      reasoningCost) /
     1_000_000
   );
 }

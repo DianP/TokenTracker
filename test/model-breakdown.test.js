@@ -176,6 +176,59 @@ test("computeRowCost on kiro-cli-agent row is non-zero and matches claude-sonnet
   );
 });
 
+test("computeRowCost on Codex row matches ccusage-style math on a cache-heavy turn", () => {
+  // Anchor: a realistic gpt-5.4 turn where the prompt is 95% cached.
+  // ccusage-equivalent formula (non_cached = input - cached, reasoning folded
+  // into output) is the source of truth here; our schema stores input as
+  // pre-subtracted non-cached, so the stored row looks like this:
+  const row = {
+    source: "codex",
+    model: "gpt-5.4",
+    input_tokens: 50_000, // non-cached (950_000 cached already removed upstream)
+    cached_input_tokens: 950_000,
+    cache_creation_input_tokens: 0,
+    output_tokens: 10_000,
+    reasoning_output_tokens: 4_000, // informational; must NOT be billed again
+  };
+  const cost = localApi.computeRowCost(row);
+
+  // gpt-5.4: input=$2.50, cache_read=$0.25, output=$15 per 1M.
+  // 50_000 * 2.5/1e6   = 0.125
+  // 950_000 * 0.25/1e6 = 0.2375
+  // 10_000 * 15/1e6    = 0.15
+  // reasoning term     = 0  (folded into output_tokens)
+  const expected = 0.125 + 0.2375 + 0.15;
+  assert.ok(
+    Math.abs(cost - expected) < 1e-9,
+    `expected ${expected}, got ${cost} (reasoning term must NOT be added for Codex)`,
+  );
+
+  // Sanity: if reasoning were double-counted, cost would jump by
+  // 4_000 * 15/1e6 = 0.06 — assert we're NOT seeing that.
+  assert.ok(cost < expected + 0.01, "reasoning_output_tokens must not be billed on Codex rows");
+});
+
+test("computeRowCost still bills reasoning for non-Codex sources (e.g. gemini)", () => {
+  // Guard against accidentally dropping the reasoning term for sources where
+  // reasoning is not folded into output_tokens. Uses gemini-2.5-pro which has
+  // an output rate; a non-zero reasoning bucket must contribute.
+  const baseRow = {
+    source: "gemini",
+    model: "gemini-2.5-pro",
+    input_tokens: 1_000,
+    cached_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    output_tokens: 1_000,
+    reasoning_output_tokens: 0,
+  };
+  const withoutReasoning = localApi.computeRowCost(baseRow);
+  const withReasoning = localApi.computeRowCost({ ...baseRow, reasoning_output_tokens: 5_000 });
+  assert.ok(
+    withReasoning > withoutReasoning,
+    "non-Codex source must still bill reasoning_output_tokens at the output rate",
+  );
+});
+
 test("local-api MODEL_PRICING Kiro entries are byte-equivalent with leaderboard-refresh edge patch", () => {
   const edgeSrc = fs.readFileSync(leaderboardRefreshPath, "utf8");
   // Extract the literal Kiro pricing lines from the edge patch so byte-drift

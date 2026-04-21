@@ -106,12 +106,22 @@ function getModelPricing(model) {
 
 function computeRowCost(row) {
   const pricing = getModelPricing(row.model);
+  // For OpenAI/Codex-family rollouts, `output_tokens` already includes any
+  // reasoning tokens (the OpenAI API's `completion_tokens` is inclusive),
+  // so adding a separate `reasoning_output_tokens * output_rate` term
+  // double-charges that slice. ccusage models this the same way. For other
+  // sources we keep the explicit reasoning term because `reasoning` is not
+  // guaranteed to be folded into `output_tokens`.
+  const reasoningIncludedInOutput = row.source === "codex" || row.source === "every-code";
+  const reasoningCost = reasoningIncludedInOutput
+    ? 0
+    : (row.reasoning_output_tokens || 0) * (pricing.output || 0);
   return (
     ((row.input_tokens || 0) * (pricing.input || 0) +
       (row.output_tokens || 0) * (pricing.output || 0) +
       (row.cached_input_tokens || 0) * (pricing.cache_read || 0) +
       (row.cache_creation_input_tokens || 0) * (pricing.cache_write || 0) +
-      (row.reasoning_output_tokens || 0) * (pricing.output || 0)) /
+      reasoningCost) /
     1_000_000
   );
 }
