@@ -557,12 +557,24 @@ function createLocalApiHandler({ queuePath }) {
     try {
       // Sticky semantics: never replace an existing on-disk session with an empty cookie map.
       if (relayCookies.size === 0) return;
-      
+
       const json = JSON.stringify(Object.fromEntries(relayCookies));
       fs.writeFileSync(cookiePath, json, { encoding: "utf8", mode: 0o600 });
     } catch (e) {
       console.error("[LocalAPI] Failed to persist relay cookies:", e.message);
     }
+  }
+
+  function clearRelayCookies(reason) {
+    if (relayCookies.size === 0) return;
+    relayCookies.clear();
+    try {
+      if (fs.existsSync(cookiePath)) fs.unlinkSync(cookiePath);
+    } catch (e) {
+      console.error("[LocalAPI] Failed to clear relay cookies:", e.message);
+      return;
+    }
+    if (reason) console.warn(`[LocalAPI] Cleared relay cookies: ${reason}`);
   }
 
   function captureSetCookies(headerValue) {
@@ -598,11 +610,17 @@ function createLocalApiHandler({ queuePath }) {
     if (changed) persistRelayCookies();
   }
 
+  function normalizeCookieHeader(value) {
+    if (Array.isArray(value)) return value.filter(Boolean).join("; ");
+    return typeof value === "string" ? value : "";
+  }
+
   function buildRelayCookieHeader(clientCookieHeader) {
-    if (relayCookies.size === 0) return clientCookieHeader || "";
+    const normalizedClientCookieHeader = normalizeCookieHeader(clientCookieHeader);
+    if (relayCookies.size === 0) return normalizedClientCookieHeader;
     const clientPairs = new Map();
-    if (clientCookieHeader) {
-      for (const part of clientCookieHeader.split(";")) {
+    if (normalizedClientCookieHeader) {
+      for (const part of normalizedClientCookieHeader.split(";")) {
         const eqIdx = part.indexOf("=");
         if (eqIdx < 1) continue;
         const n = part.substring(0, eqIdx).trim();
@@ -672,8 +690,18 @@ function createLocalApiHandler({ queuePath }) {
           if (key === "host" || key === "connection") continue;
           proxyHeaders[key] = value;
         }
-        // Inject relay cookies so WebView benefits from browser's login session
-        const mergedCookie = buildRelayCookieHeader(proxyHeaders["cookie"]);
+        const hasClientCookie = normalizeCookieHeader(proxyHeaders["cookie"]).trim().length > 0;
+        const hasCsrfHeader = typeof proxyHeaders["x-csrf-token"] === "string" && proxyHeaders["x-csrf-token"].trim().length > 0;
+        const shouldInjectRelayCookies =
+          p !== "/api/auth/refresh" || hasClientCookie || hasCsrfHeader;
+
+        // Inject relay cookies so WebView benefits from browser's login session.
+        // Refresh requests need either a browser cookie or an explicit CSRF token;
+        // otherwise replaying a stale persisted refresh cookie just manufactures
+        // Invalid CSRF errors on startup.
+        const mergedCookie = shouldInjectRelayCookies
+          ? buildRelayCookieHeader(proxyHeaders["cookie"])
+          : normalizeCookieHeader(proxyHeaders["cookie"]);
         if (mergedCookie) proxyHeaders["cookie"] = mergedCookie;
 
         const bodyChunks = [];
@@ -697,8 +725,17 @@ function createLocalApiHandler({ queuePath }) {
             return [k, v];
           });
         res.writeHead(proxyRes.status, Object.fromEntries(responseHeaders));
-        const resBody = await proxyRes.arrayBuffer();
-        res.end(Buffer.from(resBody));
+        const resBody = Buffer.from(await proxyRes.arrayBuffer());
+        if (
+          p === "/api/auth/refresh"
+          && proxyRes.status === 403
+          && !hasClientCookie
+          && !hasCsrfHeader
+          && /invalid csrf token/i.test(resBody.toString("utf8"))
+        ) {
+          clearRelayCookies("stale refresh cookie without local CSRF context");
+        }
+        res.end(resBody);
       } catch (e) {
         json(res, { error: `Auth proxy error: ${e?.message || e}` }, 502);
       }
