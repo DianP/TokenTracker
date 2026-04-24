@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
+import { ChevronDown } from "lucide-react";
 import {
   DndContext,
   KeyboardSensor,
@@ -49,7 +50,21 @@ import {
   lbStickyTdUser,
 } from "../lib/leaderboard-columns.js";
 
-const PAGE_LIMIT = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_STORAGE_KEY = "tokentracker:leaderboard:pageSize";
+
+function readStoredPageSize() {
+  if (typeof window === "undefined") return DEFAULT_PAGE_SIZE;
+  try {
+    const raw = window.localStorage.getItem(PAGE_SIZE_STORAGE_KEY);
+    const n = Number(raw);
+    if (PAGE_SIZE_OPTIONS.includes(n)) return n;
+  } catch {
+    // ignore storage errors (private mode, disabled, etc.)
+  }
+  return DEFAULT_PAGE_SIZE;
+}
 
 function formatCost(value) {
   const n = Number(value);
@@ -251,6 +266,18 @@ export function LeaderboardPage({
   );
 
   const [listPage, setListPage] = useState(1);
+  const [pageSize, setPageSizeState] = useState(readStoredPageSize);
+
+  const setPageSize = useCallback((next) => {
+    const normalized = PAGE_SIZE_OPTIONS.includes(next) ? next : DEFAULT_PAGE_SIZE;
+    setPageSizeState(normalized);
+    setListPage(1);
+    try {
+      window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(normalized));
+    } catch {
+      // ignore
+    }
+  }, []);
   const [listReloadToken, setListReloadToken] = useState(0);
   const [listState, setListState] = useState(() => ({
     loading: false,
@@ -292,8 +319,8 @@ export function LeaderboardPage({
 
   const listOffset = useMemo(() => {
     const safePage = clampInt(listPage, { min: 1, max: 1_000_000, fallback: 1 });
-    return (safePage - 1) * PAGE_LIMIT;
-  }, [listPage]);
+    return (safePage - 1) * pageSize;
+  }, [listPage, pageSize]);
 
   useEffect(() => {
     // Mock leaderboard uses local getMockLeaderboard(); real data needs InsForge URL from getLeaderboardBaseUrl().
@@ -305,7 +332,7 @@ export function LeaderboardPage({
         baseUrl: leaderboardBaseUrl,
         userId: cloudUser?.id || null,
         period,
-        limit: PAGE_LIMIT,
+        limit: pageSize,
         offset: listOffset,
       });
       if (!active) return;
@@ -324,6 +351,7 @@ export function LeaderboardPage({
     listReloadToken,
     mockEnabled,
     period,
+    pageSize,
   ]);
 
   const listData = listState.data;
@@ -352,9 +380,9 @@ export function LeaderboardPage({
       entries: rows,
       me,
       meLabel,
-      limit: PAGE_LIMIT,
+      limit: pageSize,
     });
-  }, [currentPage, listData?.entries, me, meLabel]);
+  }, [currentPage, listData?.entries, me, meLabel, pageSize]);
 
   const handleEnableSync = async () => {
     setSyncing(true);
@@ -377,7 +405,7 @@ export function LeaderboardPage({
   const hasEntries = Array.isArray(displayEntries) && displayEntries.length !== 0;
   let listBody = null;
   if (listState.loading) {
-    listBody = <LeaderboardSkeleton rows={PAGE_LIMIT} />;
+    listBody = <LeaderboardSkeleton rows={pageSize} />;
   } else if (listState.error) {
     listBody = (
       <div className="px-6 py-12 text-center">
@@ -422,7 +450,20 @@ export function LeaderboardPage({
             </tr>
           </thead>
           <tbody className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800/50">
-            {displayEntries.map((entry) => {
+            {displayEntries.map((entry, entryIdx) => {
+              if (entry?.is_ellipsis) {
+                const colSpan = 4 + orderedColumns.length;
+                return (
+                  <tr key={`ellipsis-${entryIdx}`} aria-hidden="true">
+                    <td
+                      colSpan={colSpan}
+                      className="px-4 py-2 text-center text-oai-gray-400 dark:text-oai-gray-600 bg-white dark:bg-oai-gray-950 select-none tracking-[0.4em] text-xs"
+                    >
+                      ···
+                    </td>
+                  </tr>
+                );
+              }
               const isMe = Boolean(entry?.is_me);
               const profileUserId = typeof entry?.user_id === "string" ? entry.user_id : null;
               const rawName = normalizeName(entry?.display_name);
@@ -616,34 +657,56 @@ export function LeaderboardPage({
           <div className="rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 overflow-hidden">
             {listBody}
 
-            <div className="px-6 py-3 border-t border-oai-gray-200 dark:border-oai-gray-800 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
-                <button
-                  className={cn(
-                    "px-3 py-1.5 text-sm font-medium text-oai-gray-500 dark:text-oai-gray-400 rounded-md transition-colors",
-                    canPrev && !listState.loading
-                      ? "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
-                      : "opacity-50 cursor-not-allowed"
-                  )}
-                  onClick={() => setListPage((p) => Math.max(1, p - 1))}
-                  disabled={!canPrev || listState.loading}
-                >
-                  {copy("leaderboard.pagination.prev")}
-                </button>
-                <button
-                  className={cn(
-                    "px-3 py-1.5 text-sm font-medium text-oai-gray-500 dark:text-oai-gray-400 rounded-md transition-colors",
-                    canNext && !listState.loading
-                      ? "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
-                      : "opacity-50 cursor-not-allowed"
-                  )}
-                  onClick={() => setListPage((p) => p + 1)}
-                  disabled={!canNext || listState.loading}
-                >
-                  {copy("leaderboard.pagination.next")}
-                </button>
+            <div className="px-6 py-3 border-t border-oai-gray-200 dark:border-oai-gray-800 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              <div className="flex items-center gap-2 text-sm text-oai-gray-500 dark:text-oai-gray-400">
+                <label htmlFor="leaderboard-page-size" className="whitespace-nowrap">
+                  {copy("leaderboard.pagination.page_size_label")}
+                </label>
+                <div className="relative">
+                  <select
+                    id="leaderboard-page-size"
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    disabled={listState.loading}
+                    className="appearance-none pl-3 pr-8 py-1 rounded-md bg-white dark:bg-oai-gray-950 border border-oai-gray-300 dark:border-oai-gray-700 text-oai-gray-700 dark:text-oai-gray-300 hover:border-oai-gray-400 dark:hover:border-oai-gray-600 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 disabled:opacity-50 transition-colors"
+                  >
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-oai-gray-500 dark:text-oai-gray-400"
+                    strokeWidth={2}
+                    aria-hidden="true"
+                  />
+                </div>
               </div>
+              <div className="h-5 w-px bg-oai-gray-200 dark:bg-oai-gray-800" aria-hidden="true" />
+              <button
+                className={cn(
+                  "px-3 py-1.5 text-sm font-medium text-oai-gray-500 dark:text-oai-gray-400 rounded-md transition-colors",
+                  canPrev && !listState.loading
+                    ? "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
+                    : "opacity-50 cursor-not-allowed"
+                )}
+                onClick={() => setListPage((p) => Math.max(1, p - 1))}
+                disabled={!canPrev || listState.loading}
+              >
+                {copy("leaderboard.pagination.prev")}
+              </button>
               <div className="flex flex-wrap items-center gap-1">{pageButtons}</div>
+              <button
+                className={cn(
+                  "px-3 py-1.5 text-sm font-medium text-oai-gray-500 dark:text-oai-gray-400 rounded-md transition-colors",
+                  canNext && !listState.loading
+                    ? "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white"
+                    : "opacity-50 cursor-not-allowed"
+                )}
+                onClick={() => setListPage((p) => p + 1)}
+                disabled={!canNext || listState.loading}
+              >
+                {copy("leaderboard.pagination.next")}
+              </button>
             </div>
           </div>
         </div>

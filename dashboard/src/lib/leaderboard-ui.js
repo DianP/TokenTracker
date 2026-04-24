@@ -81,14 +81,21 @@ export function injectMeIntoFirstPage({ entries, me, meLabel, limit }) {
     total_tokens: me?.total_tokens ?? "0",
   };
 
-  // Product intent: keep list length stable, drop the 4th row (index 3),
-  // and insert "YOU" at the 5th row (index 4). This creates a visible rank gap.
-  const dropIndex = 3;
-  const insertIndex = 4;
+  // Pin YOU at the bottom of page 1 so users see their own rank without
+  // the row looking interleaved at a random position. When their rank is
+  // not contiguous with the last natural row, insert an ellipsis separator
+  // row right above YOU so the "jump" is explicit instead of resembling a
+  // sort bug. Keep list length stable by trimming the trailing rows we
+  // displace.
+  const pruned = rows.filter((e) => !e?.is_me);
+  const lastRow = pruned[pruned.length - 1];
+  const lastRank = lastRow && typeof lastRow.rank === "number" ? lastRow.rank : 0;
+  const needsGap = meRank > lastRank + 1;
 
-  const pruned = rows.filter((e) => !e?.is_me).filter((_e, idx) => idx !== dropIndex);
-  const next = pruned.slice();
-  next.splice(Math.min(insertIndex, next.length), 0, injectedRow);
-
-  return next.slice(0, safeLimit);
+  if (needsGap) {
+    const kept = pruned.slice(0, Math.max(0, safeLimit - 2));
+    return [...kept, { is_ellipsis: true, rank: null, display_name: "" }, injectedRow];
+  }
+  const kept = pruned.slice(0, Math.max(0, safeLimit - 1));
+  return [...kept, injectedRow];
 }

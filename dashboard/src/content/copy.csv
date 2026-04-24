@@ -549,6 +549,7 @@ leaderboard.signin_button,ui,LeaderboardPage,LeaderboardPage,signin_button,"Sign
 leaderboard.sync_prompt,ui,LeaderboardPage,LeaderboardPage,sync_prompt,"Enable Cloud Sync to appear in rankings",,active
 leaderboard.sync_button.idle,ui,LeaderboardPage,LeaderboardPage,sync_button_idle,"Enable & Sync",,active
 leaderboard.sync_button.busy,ui,LeaderboardPage,LeaderboardPage,sync_button_busy,"Syncing...",,active
+leaderboard.pagination.page_size_label,ui,LeaderboardPage,LeaderboardPage,page_size_label,"Rows per page",,active
 leaderboard.github.tooltipAction,ui,LeaderboardPage,LeaderboardPage,github_tooltip_action,"Click to open GitHub profile",,active
 leaderboard.github.tooltipPrefix,ui,LeaderboardPage,LeaderboardPage,github_tooltip_prefix,"Set yours in",,active
 leaderboard.github.tooltipSettingsLink,ui,LeaderboardPage,LeaderboardPage,github_tooltip_link,"Settings",,active
