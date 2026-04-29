@@ -1,6 +1,6 @@
 {
   "name": "tokentracker-cli",
-  "version": "0.5.92",
+  "version": "0.5.93",
   "description": "Token usage tracker for AI agent CLIs (Claude Code, Codex, Cursor, Kiro, Gemini, OpenCode, OpenClaw, Hermes, GitHub Copilot)",
   "main": "src/cli.js",
   "bin": {
@@ -31,6 +31,8 @@
     "dev:shim": "node scripts/dev-bin-shim.cjs",
     "graph:auto-index": "node scripts/graph/auto-index.cjs",
     "graph:scip": "node scripts/graph/generate-scip.cjs",
+    "pricing:build-seed": "node scripts/build-pricing-seed.cjs",
+    "prepublishOnly": "node scripts/build-pricing-seed.cjs",
     "test": "node --test test/*.test.js",
     "validate:copy": "node scripts/validate-copy-registry.cjs",
     "validate:guardrails": "node scripts/validate-architecture-guardrails.cjs",

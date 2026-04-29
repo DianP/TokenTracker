@@ -10,7 +10,7 @@ import {
 } from "./locale";
 
 const REQUIRED_COLUMNS = ["key", "module", "page", "component", "slot", "text"];
-const LOCALE_REGISTRIES = {
+const LOCALE_REGISTRIES: Record<string, TranslationRegistry> = {
   [ZH_CN_LOCALE]: {
     ...zhCore,
     ...zhDashboard,

@@ -22,15 +22,13 @@ describe("ProjectUsagePanel", () => {
     document.documentElement.classList.remove("screenshot-capture");
   });
 
-  it("renders a repo card with a corner star slot and three info lines", () => {
-    const { container } = render(<ProjectUsagePanel entries={[entry]} />);
-    const card = container.querySelector('[data-project-card="true"]');
+  it("renders a repo card link with repository identity and usage", () => {
+    render(<ProjectUsagePanel entries={[entry]} />);
 
-    expect(card).toBeTruthy();
-    expect(card?.querySelector('[data-star-slot="corner"]')).toBeTruthy();
-    expect(card?.querySelector('[data-card-line="identity"]')).toBeTruthy();
-    expect(card?.querySelector('[data-card-line="repo"]')).toBeTruthy();
-    expect(card?.querySelector('[data-card-line="tokens"]')).toBeTruthy();
+    const card = screen.getByRole("link", { name: /hello/i });
+    expect(card).toHaveAttribute("href", "https://github.com/octo/hello");
+    expect(screen.getByText("hello")).toBeInTheDocument();
+    expect(screen.getByText(/★/)).toBeInTheDocument();
   });
 
   it("prefers total tokens when billable tokens are zero", () => {

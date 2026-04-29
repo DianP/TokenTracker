@@ -1,0 +1,33 @@
+{
+  "_meta": {
+    "note": "Curated price overrides. Always wins over LiteLLM. Two reasons to live here: (1) self-defined alias names that LiteLLM will never carry (kiro-*, hy3-*, composer-*, kimi-for-coding, free-tier OpenRouter routes); (2) prices we want to pin even if LiteLLM has the model (e.g. cache_write fields LiteLLM often omits). Units: USD per million tokens. Edit this file to override pricing without redeploying.",
+    "units": "usd_per_million_tokens"
+  },
+  "exact": {
+    "kiro-agent":       { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75 },
+    "kiro-cli-agent":   { "input": 3,    "output": 15,   "cache_read": 0.3,   "cache_write": 3.75 },
+    "hy3-preview-agent":{ "input": 0,    "output": 0,    "cache_read": 0 },
+    "hy3-preview":      { "input": 0,    "output": 0,    "cache_read": 0 },
+    "composer-1":       { "input": 1.25, "output": 10,   "cache_read": 0.125 },
+    "composer-1.5":     { "input": 3.5,  "output": 17.5, "cache_read": 0.35 },
+    "composer-2":       { "input": 0.5,  "output": 2.5,  "cache_read": 0.2 },
+    "composer-2-fast":  { "input": 1.5,  "output": 7.5,  "cache_read": 0.15 },
+    "kimi-for-coding":  { "input": 0.6,  "output": 2,    "cache_read": 0.15 },
+    "kimi-k2.5":        { "input": 0.6,  "output": 2,    "cache_read": 0.15 },
+    "kimi-k2.5-free":   { "input": 0,    "output": 0,    "cache_read": 0 },
+    "glm-4.7-free":     { "input": 0,    "output": 0,    "cache_read": 0 },
+    "nemotron-3-super-free":{ "input": 0, "output": 0,   "cache_read": 0 },
+    "mimo-v2-pro-free": { "input": 0,    "output": 0,    "cache_read": 0 },
+    "minimax-m2.1-free":{ "input": 0,    "output": 0,    "cache_read": 0 },
+    "MiniMax-M2.1":     { "input": 0.5,  "output": 3,    "cache_read": 0.05 }
+  },
+  "alias": {
+    "auto": "composer-1"
+  },
+  "fuzzy": [
+    { "match": "kiro",     "ref": "kiro-cli-agent" },
+    { "match": "hy3",      "ref": "hy3-preview-agent" },
+    { "match": "composer", "ref": "composer-1" },
+    { "match": "kimi",     "ref": "kimi-k2.5" }
+  ]
+}

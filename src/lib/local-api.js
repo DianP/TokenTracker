@@ -9,124 +9,18 @@ const SYNC_TIMEOUT_MS = 120_000;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
 
 // ---------------------------------------------------------------------------
-// Per-model pricing (USD per million tokens)
+// Per-model pricing — delegated to src/lib/pricing/
+//   - CURATED overrides (kiro-*, hy3-*, composer-*, kimi-for-coding, etc.)
+//   - LiteLLM live data (mainstream claude / gpt-5 / gemini), 24h disk-cached
+//   - Bundled seed snapshot for first-install / offline fallback
 // ---------------------------------------------------------------------------
 
-// Rates per million tokens (USD). Sources: LiteLLM, OpenAI, Google, OpenRouter.
-const MODEL_PRICING = {
-  // ── Anthropic Claude ──
-  "claude-opus-4-6": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
-  "claude-opus-4-5-20250414": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
-  "claude-sonnet-4-6": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-sonnet-4-5-20250514": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-sonnet-4-20250514": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-haiku-4-5-20251001": { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
-  "claude-3-5-sonnet-20241022": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "claude-3-5-haiku-20241022": { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
-  // ── OpenAI GPT / Codex ──
-  "gpt-5": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-high": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-codex": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5-codex-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-mini": { input: 0.25, output: 2, cache_read: 0.025 },
-  "gpt-5.1-codex-max": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-max-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-max-xhigh-fast": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-high": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.1-codex-max-high": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gpt-5.2": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-high": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-high-fast": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-codex": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.2-codex-high": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.3-codex": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.3-codex-high": { input: 1.75, output: 14, cache_read: 0.175 },
-  "gpt-5.4": { input: 2.5, output: 15, cache_read: 0.25 },
-  "gpt-5.4-mini": { input: 0.75, output: 4.5, cache_read: 0.075 },
-  "gpt-5.4-medium": { input: 1.5, output: 10, cache_read: 0.15 },
-  "o3": { input: 2, output: 8, cache_read: 0.5 },
-  // ── Google Gemini (official: ai.google.dev/pricing) ──
-  "gemini-2.5-pro": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gemini-2.5-pro-preview-06-05": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gemini-2.5-pro-preview-05-06": { input: 1.25, output: 10, cache_read: 0.125 },
-  "gemini-2.5-flash": { input: 0.3, output: 2.5, cache_read: 0.03 },
-  "gemini-3-flash-preview": { input: 0.5, output: 3, cache_read: 0.05 },
-  "gemini-3-pro-preview": { input: 2, output: 12, cache_read: 0.2 },
-  "gemini-3.1-pro-preview": { input: 2, output: 12, cache_read: 0.2 },
-  // ── Cursor Composer ──
-  "composer-1": { input: 1.25, output: 10, cache_read: 0.125 },
-  "composer-1.5": { input: 3.5, output: 17.5, cache_read: 0.35 },
-  "composer-2": { input: 0.5, output: 2.5, cache_read: 0.2 },
-  "composer-2-fast": { input: 1.5, output: 7.5, cache_read: 0.15 },
-  // ── Moonshot Kimi (official: platform.moonshot.ai) ──
-  "kimi-for-coding": { input: 0.6, output: 2, cache_read: 0.15 },
-  "kimi-k2.5": { input: 0.6, output: 2, cache_read: 0.15 },
-  "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
-  // ── AWS Kiro (Kiro IDE + Kiro CLI — both route through Bedrock, most
-  //    commonly claude-sonnet-4; rates mirror the sonnet-4 table below so
-  //    costs stay consistent with the real underlying model when a Bedrock
-  //    model_id isn't exposed). Mirrored byte-for-byte in
-  //    dashboard/edge-patches/tokentracker-leaderboard-refresh.ts for
-  //    leaderboard estimated_cost_usd. ──
-  "kiro-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  "kiro-cli-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
-  // ── Misc / Free ──
-  "glm-4.7-free": { input: 0, output: 0, cache_read: 0 },
-  "nemotron-3-super-free": { input: 0, output: 0, cache_read: 0 },
-  "mimo-v2-pro-free": { input: 0, output: 0, cache_read: 0 },
-  "minimax-m2.1-free": { input: 0, output: 0, cache_read: 0 },
-  "MiniMax-M2.1": { input: 0.5, output: 3, cache_read: 0.05 },
-};
-
-const ZERO_PRICING = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
-
-function getModelPricing(model) {
-  if (!model) return ZERO_PRICING;
-  const exact = MODEL_PRICING[model];
-  if (exact) return exact;
-  // Fuzzy match for common model families
-  const lower = model.toLowerCase();
-  if (lower.includes("opus")) return MODEL_PRICING["claude-opus-4-6"];
-  if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
-  if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
-  if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
-  if (lower.includes("gpt-5.3")) return MODEL_PRICING["gpt-5.3-codex"];
-  if (lower.includes("gpt-5.2")) return MODEL_PRICING["gpt-5.2"];
-  if (lower.includes("gpt-5.1")) return MODEL_PRICING["gpt-5.1-codex"];
-  if (lower.includes("gpt-5")) return MODEL_PRICING["gpt-5"];
-  if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
-  if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
-  if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
-  if (lower.includes("kiro")) return MODEL_PRICING["kiro-cli-agent"];
-  if (lower.includes("composer")) return MODEL_PRICING["composer-1"];
-  if (lower === "auto") return MODEL_PRICING["composer-1"];
-  return ZERO_PRICING;
-}
-
-function computeRowCost(row) {
-  const pricing = getModelPricing(row.model);
-  // For OpenAI/Codex-family rollouts, `output_tokens` already includes any
-  // reasoning tokens (the OpenAI API's `completion_tokens` is inclusive),
-  // so adding a separate `reasoning_output_tokens * output_rate` term
-  // double-charges that slice. ccusage models this the same way. For other
-  // sources we keep the explicit reasoning term because `reasoning` is not
-  // guaranteed to be folded into `output_tokens`.
-  const reasoningIncludedInOutput = row.source === "codex" || row.source === "every-code";
-  const reasoningCost = reasoningIncludedInOutput
-    ? 0
-    : (row.reasoning_output_tokens || 0) * (pricing.output || 0);
-  return (
-    ((row.input_tokens || 0) * (pricing.input || 0) +
-      (row.output_tokens || 0) * (pricing.output || 0) +
-      (row.cached_input_tokens || 0) * (pricing.cache_read || 0) +
-      (row.cache_creation_input_tokens || 0) * (pricing.cache_write || 0) +
-      reasoningCost) /
-    1_000_000
-  );
-}
+const {
+  MODEL_PRICING,
+  getModelPricing,
+  computeRowCost,
+  ensurePricingLoaded,
+} = require("./pricing");
 
 // ---------------------------------------------------------------------------
 // Queue data helpers
@@ -1316,4 +1210,5 @@ module.exports = {
   MODEL_PRICING,
   getModelPricing,
   computeRowCost,
+  ensurePricingLoaded,
 };

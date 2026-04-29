@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react";
 import { copy } from "../../lib/copy";
 import { safeWriteClipboardImage } from "../../lib/safe-browser";
-// @ts-ignore — InsforgeAuthContext.jsx has no .d.ts
 import { useInsforgeAuth } from "../../contexts/InsforgeAuthContext.jsx";
 import {
   saveShareImageToDownloads,
@@ -14,7 +13,6 @@ import {
   downloadBlobAsFile,
   blobToPngDataUrl,
 } from "./capture-share-card";
-// @ts-ignore — ShareCard.jsx has no .d.ts; the runtime shape is fine.
 import {
   ShareCard,
   SHARE_VARIANTS,

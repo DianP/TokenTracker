@@ -193,7 +193,11 @@ export function LoginPage() {
   // Mark native login in sessionStorage so /auth/callback knows to redirect to app
   useEffect(() => {
     if (isNativeLogin && typeof window !== "undefined") {
-      try { window.sessionStorage.setItem("tokentracker_native_login", "1"); } catch {}
+      try {
+        window.sessionStorage.setItem("tokentracker_native_login", "1");
+      } catch {
+        // Ignore storage failures; OAuth can still proceed without the marker.
+      }
     }
   }, [isNativeLogin]);
 

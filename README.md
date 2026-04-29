@@ -6,7 +6,7 @@
 
 ### Know exactly what you're spending on AI — across every CLI
 
-Auto-collect token counts from **11 AI coding tools**, aggregate them locally, see real cost trends in a beautiful dashboard, **and install the same Skills across every agent in one click**. No cloud account, no API keys, no setup — just one command.
+Auto-collect token counts from **12 AI coding tools**, aggregate them locally, see real cost trends in a beautiful dashboard, **and install the same Skills across every agent in one click**. No cloud account, no API keys, no setup — just one command.
 
 [![npm version](https://img.shields.io/npm/v/tokentracker-cli.svg?color=blue)](https://www.npmjs.com/package/tokentracker-cli)
 [![npm downloads](https://img.shields.io/npm/dm/tokentracker-cli.svg?color=brightgreen)](https://www.npmjs.com/package/tokentracker-cli)
@@ -78,7 +78,7 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 
 ## ✨ Features
 
-- 🔌 **11 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code
+- 🔌 **12 AI tools out of the box** — Claude Code, Codex CLI, Cursor, Gemini CLI, Kiro, OpenCode, OpenClaw, Every Code, Hermes Agent, GitHub Copilot, Kimi Code, CodeBuddy
 - 🧩 **Skills manager** — browse 250+ public skills from `anthropics/skills`, `ComposioHQ/awesome-claude-skills`, `skills.sh` and any GitHub repo you add; install once and sync to Claude / Codex / Gemini / OpenCode / Hermes with per-target toggles; one-click Undo
 - 🏠 **100% local** — Token data never leaves your machine. No account, no API keys.
 - 🚀 **Zero config** — Hooks auto-install on first run. From zero to dashboard in 30 seconds.
@@ -86,7 +86,7 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 - 🖥️ **Native macOS app** — Menu bar status icon, embedded server, WKWebView dashboard
 - 🎨 **4 desktop widgets** — Pin Usage / Activity Heatmap / Top Models / Usage Limits to your desktop
 - 📈 **Real-time rate limit tracking** — Claude / Codex / Cursor / Gemini / Kiro / Copilot / Antigravity quota windows with reset countdowns
-- 💰 **Cost engine** — 70+ model pricing tables, accurate USD breakdowns
+- 💰 **Cost engine** — 2,200+ models priced via [LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json) (auto-refreshed daily) + curated overrides for niche tools (Kiro, Cursor Composer, Kimi, CodeBuddy hy3); 24h disk cache + bundled offline snapshot mean accurate USD without an internet connection. Models without published vendor pricing (e.g. Tencent hy3-preview) are tracked by tokens but show $0 cost until the vendor publishes a rate.
 - 🌐 **Optional leaderboard** — Compare with developers worldwide; drag-to-reorder columns to focus on the providers you care about (opt-in, sign in to participate)
 - 🔒 **Privacy-first** — Only token counts and timestamps. Never prompts, responses, or file contents.
 
@@ -155,9 +155,10 @@ Upgrade with `brew upgrade --cask mm7894215/tokentracker/tokentracker`. The tap 
 | **Hermes Agent** | ✅ Auto | SQLite sessions table (`~/.hermes/state.db`) |
 | **GitHub Copilot** | ✅ Auto | OpenTelemetry file exporter (`COPILOT_OTEL_FILE_EXPORTER_PATH`) |
 | **Kimi Code** | ✅ Auto | Passive `wire.jsonl` reader (`~/.kimi/sessions/**/wire.jsonl`) |
+| **CodeBuddy** (Tencent) | ✅ Auto | SessionEnd hook in `~/.codebuddy/settings.json` (Claude-Code fork) |
 
 > **Do I need to install any plugin or hook manually?** No. `tokentracker` (or `tokentracker init`) handles everything on first run:
-> - **Hook-based** tools (Claude Code, Codex, Gemini, Every Code) — we write a SessionEnd hook or TOML notify entry into the tool's own config.
+> - **Hook-based** tools (Claude Code, Codex, Gemini, Every Code, **CodeBuddy**) — we write a SessionEnd hook or TOML notify entry into the tool's own config.
 > - **Plugin-based** tools (OpenCode, **OpenClaw**) — the plugin ships inside the npm package (`~/.tokentracker/app/openclaw-plugin/`). We link it via the tool's own CLI (`openclaw plugins install --link …` + `enable`). No download, no drag-and-drop.
 > - **Passive readers** (Cursor, Kiro, Hermes, Kimi Code, Copilot) — nothing is installed into those tools. We only read files they already produce (SQLite DB, JSONL, OTEL export).
 >
@@ -173,7 +174,7 @@ Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/iss
 
 |                          | **TokenTracker** | ccusage     | Cursor stats |
 |--------------------------|:---:|:---:|:---:|
-| **AI tools supported**   | **10**           | 1 (Claude)  | 1 (Cursor)   |
+| **AI tools supported**   | **12**           | 1 (Claude)  | 1 (Cursor)   |
 | **Local-first, no account** | ✅            | ✅           | ❌            |
 | **Native menu bar app**  | ✅                | ❌           | ❌            |
 | **Desktop widgets**      | ✅ 4 widgets      | ❌           | ❌            |
@@ -185,7 +186,7 @@ Missing your tool? [Open an issue](https://github.com/mm7894215/TokenTracker/iss
 
 ```mermaid
 flowchart LR
-    A["AI CLI Tools<br/>Claude · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot · Kimi Code"]
+    A["AI CLI Tools<br/>Claude · Codex · Cursor · Gemini · Kiro<br/>OpenCode · OpenClaw · Every Code · Hermes · Copilot · Kimi Code · CodeBuddy"]
     A -->|hooks trigger| B[Token Tracker]
     B -->|parse logs<br/>30-min UTC buckets| C[(Local SQLite)]
     C --> D[Web Dashboard]

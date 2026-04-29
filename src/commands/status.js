@@ -5,7 +5,11 @@ const fssync = require("node:fs");
 
 const { readJson } = require("../lib/fs");
 const { readCodexNotify, readEveryCodeNotify } = require("../lib/codex-config");
-const { isClaudeHookConfigured, buildClaudeHookCommand } = require("../lib/claude-config");
+const {
+  isClaudeHookConfigured,
+  buildClaudeHookCommand,
+  buildHookCommand,
+} = require("../lib/claude-config");
 const {
   resolveGeminiConfigDir,
   resolveGeminiSettingsPath,
@@ -20,7 +24,12 @@ const { collectTrackerDiagnostics } = require("../lib/diagnostics");
 const { probeOpenclawHookState } = require("../lib/openclaw-hook");
 const { probeOpenclawSessionPluginState } = require("../lib/openclaw-session-plugin");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
-const { resolveKimiWireFiles, resolveKiroCliDbPath } = require("../lib/rollout");
+const {
+  resolveKimiWireFiles,
+  resolveKiroCliDbPath,
+  resolveCodebuddyHome,
+  resolveCodebuddyProjectFiles,
+} = require("../lib/rollout");
 
 async function cmdStatus(argv = []) {
   const opts = parseArgs(argv);
@@ -46,11 +55,16 @@ async function cmdStatus(argv = []) {
   const codeHome = process.env.CODE_HOME || path.join(home, ".code");
   const codeConfigPath = path.join(codeHome, "config.toml");
   const claudeSettingsPath = path.join(home, ".claude", "settings.json");
+  const codebuddySettingsPath = path.join(
+    process.env.CODEBUDDY_HOME || path.join(home, ".codebuddy"),
+    "settings.json",
+  );
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: process.env });
   const geminiSettingsPath = resolveGeminiSettingsPath({ configDir: geminiConfigDir });
   const opencodeConfigDir = resolveOpencodeConfigDir({ home, env: process.env });
   const notifyPath = path.join(binDir, "notify.cjs");
   const claudeHookCommand = buildClaudeHookCommand(notifyPath);
+  const codebuddyHookCommand = buildHookCommand(notifyPath, "codebuddy");
   const geminiHookCommand = buildGeminiHookCommand(notifyPath);
 
   const config = await readJson(configPath);
@@ -73,6 +87,10 @@ async function cmdStatus(argv = []) {
   const claudeHookConfigured = await isClaudeHookConfigured({
     settingsPath: claudeSettingsPath,
     hookCommand: claudeHookCommand,
+  });
+  const codebuddyHookConfigured = await isClaudeHookConfigured({
+    settingsPath: codebuddySettingsPath,
+    hookCommand: codebuddyHookCommand,
   });
   const geminiHookConfigured = await isGeminiHookConfigured({
     settingsPath: geminiSettingsPath,
@@ -125,6 +143,14 @@ async function cmdStatus(argv = []) {
   const kiroCliDbPath = resolveKiroCliDbPath(process.env);
   const kiroCliInstalled = fssync.existsSync(kiroCliDbPath);
 
+  // CodeBuddy — passive scan only (no hooks). Surface the file count so
+  // operators can confirm jsonl logs are being discovered.
+  const codebuddyHome = resolveCodebuddyHome(process.env);
+  const codebuddyInstalled = fssync.existsSync(codebuddyHome);
+  const codebuddyFiles = codebuddyInstalled
+    ? resolveCodebuddyProjectFiles(process.env)
+    : [];
+
   const copilotToken = readCopilotOauthToken({ home });
   const copilotOtel = describeCopilotOtelStatus({ home, env: process.env });
   const copilotLines = formatCopilotLines({ token: copilotToken, otel: copilotOtel });
@@ -156,6 +182,9 @@ async function cmdStatus(argv = []) {
         : null,
       kiroCliInstalled
         ? `- Kiro CLI: SQLite data.sqlite3 found (tokens approximated from char lengths, merged under 'kiro' source)`
+        : null,
+      codebuddyInstalled
+        ? `- CodeBuddy hooks: ${codebuddyHookConfigured ? "set" : "unset"} (${codebuddyFiles.length} session jsonl file${codebuddyFiles.length !== 1 ? "s" : ""} found)`
         : null,
       ...copilotLines,
       ...subscriptionLines,

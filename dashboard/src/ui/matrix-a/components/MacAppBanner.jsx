@@ -42,12 +42,18 @@ export function MacAppBanner({ todayTokens = 0, isSyncing = false }) {
         return true;
       }
       return false;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   });
 
   const handleDismiss = useCallback(() => {
     setDismissed(true);
-    try { localStorage.setItem(dismissKey, "1"); } catch {}
+    try {
+      localStorage.setItem(dismissKey, "1");
+    } catch {
+      // Ignore storage failures; the banner can reappear next session.
+    }
   }, [dismissKey]);
 
   if (dismissed) return null;

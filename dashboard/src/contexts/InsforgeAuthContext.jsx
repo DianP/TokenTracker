@@ -140,7 +140,7 @@ export function InsforgeAuthProvider({ children }) {
         const result = await client.auth.signInWithOAuth({
           provider,
           redirectTo,
-          // @ts-ignore - skipBrowserRedirect is supported but not in types
+          // @ts-expect-error - skipBrowserRedirect is supported but not in types
           skipBrowserRedirect: true,
         });
         if (result.data?.url) {
@@ -153,7 +153,9 @@ export function InsforgeAuthProvider({ children }) {
               headers: { "Content-Type": "application/json", ...authHeaders },
               body: JSON.stringify({ native: true }),
             });
-          } catch {}
+          } catch {
+            // Best effort: native OAuth can still continue without the bridge marker.
+          }
           nativeBridge.postMessage(result.data.url);
         }
         return result;

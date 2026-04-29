@@ -83,6 +83,11 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   //    most commonly claude-sonnet-4). ──
   "kiro-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
   "kiro-cli-agent": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+  // ── Tencent CodeBuddy (hy3-preview family). Mirrored from
+  //    src/lib/local-api.js — Tencent has not published $/MTok rates so
+  //    these stay at 0. TODO: confirm Tencent hy3 pricing. ──
+  "hy3-preview-agent": { input: 0, output: 0, cache_read: 0 },
+  "hy3-preview": { input: 0, output: 0, cache_read: 0 },
   // ── Misc / Free ──
   "glm-4.7-free": { input: 0, output: 0, cache_read: 0 },
   "nemotron-3-super-free": { input: 0, output: 0, cache_read: 0 },
@@ -109,6 +114,7 @@ function getModelPricing(model: string) {
   if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
   if (lower.includes("kiro")) return MODEL_PRICING["kiro-cli-agent"];
+  if (lower.includes("hy3")) return MODEL_PRICING["hy3-preview-agent"];
   if (lower.includes("composer")) return MODEL_PRICING["composer-1"];
   if (lower === "auto") return MODEL_PRICING["composer-1"];
   return ZERO_PRICING;

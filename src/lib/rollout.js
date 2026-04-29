@@ -4074,6 +4074,286 @@ async function parseKimiIncremental({ wireFiles, cursors, queuePath, onProgress,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CodeBuddy CLI — passive JSONL reader (~/.codebuddy/projects/<cwd>/<sid>.jsonl)
+//
+// Tencent's CodeBuddy CLI is structurally cloned from Claude Code:
+//   ~/.codebuddy/projects/<encoded-cwd>/<sessionId>.jsonl  — conversation log
+//   ~/.codebuddy/sessions/<pid>.json                       — session metadata
+//   ~/.codebuddy/settings.json                             — `{"model": "..."}`
+//
+// CodeBuddy ships NO hook system — we incrementally tail the JSONL files on
+// each sync (passive scan only, same shape as Kimi's wire.jsonl reader).
+//
+// Per-line record types: message, reasoning, topic, file-history-snapshot.
+// Only `type=="message" && role=="assistant"` carry token usage. The shape:
+//
+//   providerData.rawUsage = {
+//     prompt_tokens: 22223,           // OpenAI-style — INCLUDES cached
+//     completion_tokens: 250,
+//     prompt_tokens_details: { cached_tokens: 512, reasoning_tokens?: number },
+//     cache_read_input_tokens: 0,     // Anthropic-style mirror (often 0)
+//     cache_creation_input_tokens: 0,
+//   }
+//
+// Token math (matches the repo's queue convention; do NOT pass prompt_tokens
+// through unchanged — that double-counts cached input):
+//   input_tokens               = prompt_tokens - prompt_tokens_details.cached_tokens
+//   cached_input_tokens        = prompt_tokens_details.cached_tokens
+//   cache_creation_input_tokens = cache_creation_input_tokens (often 0)
+//   output_tokens              = completion_tokens
+//   reasoning_output_tokens    = prompt_tokens_details.reasoning_tokens || 0
+//   total_tokens               = sum of the above
+// ─────────────────────────────────────────────────────────────────────────────
+
+function resolveCodebuddyHome(env = process.env) {
+  const home = env.HOME || require("node:os").homedir();
+  return env.CODEBUDDY_HOME || path.join(home, ".codebuddy");
+}
+
+function resolveCodebuddyDefaultModel(env = process.env) {
+  const fallback = "codebuddy-unknown";
+  try {
+    const settingsPath = path.join(resolveCodebuddyHome(env), "settings.json");
+    const raw = fssync.readFileSync(settingsPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && typeof parsed.model === "string" && parsed.model.trim()) {
+      return parsed.model.trim();
+    }
+  } catch (_e) {
+    // settings missing or malformed — fall through
+  }
+  return fallback;
+}
+
+function resolveCodebuddyProjectFiles(env = process.env) {
+  const projectsDir = path.join(resolveCodebuddyHome(env), "projects");
+  if (!fssync.existsSync(projectsDir)) return [];
+  const files = [];
+  try {
+    for (const cwd of fssync.readdirSync(projectsDir)) {
+      const cwdDir = path.join(projectsDir, cwd);
+      let stat;
+      try { stat = fssync.statSync(cwdDir); } catch { continue; }
+      if (!stat.isDirectory()) continue;
+      let entries;
+      try { entries = fssync.readdirSync(cwdDir); } catch { continue; }
+      for (const entry of entries) {
+        if (!entry.endsWith(".jsonl")) continue;
+        files.push(path.join(cwdDir, entry));
+      }
+    }
+  } catch {
+    // ignore — return what we have
+  }
+  files.sort((a, b) => a.localeCompare(b));
+  return files;
+}
+
+async function parseCodebuddyIncremental({
+  projectFiles,
+  cursors,
+  queuePath,
+  onProgress,
+  env,
+  defaultModel,
+} = {}) {
+  await ensureDir(path.dirname(queuePath));
+  const codebuddyState =
+    cursors.codebuddy && typeof cursors.codebuddy === "object" ? cursors.codebuddy : {};
+  const seenIds = new Set(
+    Array.isArray(codebuddyState.seenIds) ? codebuddyState.seenIds : [],
+  );
+  const fileOffsets =
+    codebuddyState.fileOffsets && typeof codebuddyState.fileOffsets === "object"
+      ? { ...codebuddyState.fileOffsets }
+      : {};
+
+  const files = Array.isArray(projectFiles)
+    ? projectFiles
+    : resolveCodebuddyProjectFiles(env || process.env);
+  const fallbackModel = defaultModel || resolveCodebuddyDefaultModel(env || process.env);
+
+  if (files.length === 0) {
+    cursors.codebuddy = {
+      ...codebuddyState,
+      seenIds: Array.from(seenIds),
+      fileOffsets,
+      updatedAt: new Date().toISOString(),
+    };
+    return { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+  }
+
+  const hourlyState = normalizeHourlyState(cursors?.hourly);
+  const touchedBuckets = new Set();
+  const cb = typeof onProgress === "function" ? onProgress : null;
+  let recordsProcessed = 0;
+  let eventsAggregated = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const filePath = files[fileIdx];
+    let stat;
+    try { stat = fssync.statSync(filePath); } catch { continue; }
+
+    const prevEntry = fileOffsets[filePath] || {};
+    const prevSize = Number(prevEntry.size) || 0;
+    const prevIno = prevEntry.ino;
+    // Re-read from start if file shrunk (truncate/rewrite) or inode changed
+    // (file deleted + recreated). Otherwise pick up after the last read offset.
+    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+    if (stat.size <= startOffset) continue;
+
+    let stream;
+    try {
+      stream = fssync.createReadStream(filePath, {
+        encoding: "utf8",
+        start: startOffset,
+      });
+    } catch { continue; }
+    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    for await (const line of rl) {
+      if (!line || !line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+
+      // Only assistant message events carry token usage.
+      if (!entry || entry.type !== "message" || entry.role !== "assistant") continue;
+
+      const provider = entry.providerData;
+      const rawUsage = provider && typeof provider === "object" ? provider.rawUsage : null;
+      if (!rawUsage || typeof rawUsage !== "object") continue;
+
+      // Dedup per-message — message id (uuid) is most stable, then session +
+      // timestamp as fallback.
+      const sessionId =
+        typeof entry.sessionId === "string" && entry.sessionId
+          ? entry.sessionId
+          : path.basename(filePath, ".jsonl");
+      const tsMs =
+        Number.isFinite(Number(entry.timestamp)) && Number(entry.timestamp) > 0
+          ? Number(entry.timestamp)
+          : null;
+      const messageId =
+        typeof entry.uuid === "string" && entry.uuid
+          ? entry.uuid
+          : typeof entry.id === "string" && entry.id
+            ? entry.id
+            : tsMs != null
+              ? `${sessionId}:${tsMs}`
+              : null;
+      if (!messageId) continue;
+      if (seenIds.has(messageId)) continue;
+
+      recordsProcessed++;
+
+      const promptTokens = toNonNegativeInt(rawUsage.prompt_tokens);
+      const completionTokens = toNonNegativeInt(rawUsage.completion_tokens);
+      const details =
+        rawUsage.prompt_tokens_details && typeof rawUsage.prompt_tokens_details === "object"
+          ? rawUsage.prompt_tokens_details
+          : {};
+      const cachedTokens = toNonNegativeInt(details.cached_tokens);
+      // Anthropic-style mirror; CodeBuddy emits these too even if usually 0.
+      const cacheReadAlt = toNonNegativeInt(rawUsage.cache_read_input_tokens);
+      const cacheCreation = toNonNegativeInt(rawUsage.cache_creation_input_tokens);
+      const reasoningTokens = toNonNegativeInt(details.reasoning_tokens);
+
+      // CRITICAL: prompt_tokens is OpenAI-style and INCLUDES cached.
+      // Subtract cached so input_tokens is pure non-cached input — matches
+      // the repo's normalization convention (see CLAUDE.md "Token
+      // Normalization Convention"). cache_read takes the larger of the two
+      // mirrored fields (rawUsage.cache_read_input_tokens vs
+      // prompt_tokens_details.cached_tokens) since CodeBuddy populates one
+      // or the other depending on upstream provider.
+      const cacheRead = Math.max(cachedTokens, cacheReadAlt);
+      const inputTokens = Math.max(0, promptTokens - cacheRead);
+
+      if (
+        inputTokens === 0 &&
+        completionTokens === 0 &&
+        cacheRead === 0 &&
+        cacheCreation === 0
+      ) {
+        seenIds.add(messageId);
+        continue;
+      }
+
+      if (tsMs == null) {
+        seenIds.add(messageId);
+        continue;
+      }
+      const tsIso = new Date(tsMs).toISOString();
+      const bucketStart = toUtcHalfHourStart(tsIso);
+      if (!bucketStart) continue;
+
+      const model =
+        normalizeModelInput(provider?.model) ||
+        normalizeModelInput(entry.model) ||
+        fallbackModel;
+
+      const delta = {
+        input_tokens: inputTokens,
+        cached_input_tokens: cacheRead,
+        cache_creation_input_tokens: cacheCreation,
+        output_tokens: completionTokens,
+        reasoning_output_tokens: reasoningTokens,
+        total_tokens:
+          inputTokens + completionTokens + cacheRead + cacheCreation + reasoningTokens,
+        conversation_count: 1,
+      };
+
+      const bucket = getHourlyBucket(hourlyState, "codebuddy", model, bucketStart);
+      addTotals(bucket.totals, delta);
+      touchedBuckets.add(bucketKey("codebuddy", model, bucketStart));
+      seenIds.add(messageId);
+      eventsAggregated++;
+
+      if (cb) {
+        cb({
+          index: fileIdx + 1,
+          total: files.length,
+          recordsProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+    }
+
+    let postStat = stat;
+    try { postStat = fssync.statSync(filePath); } catch {}
+    fileOffsets[filePath] = {
+      size: postStat.size,
+      mtimeMs: postStat.mtimeMs,
+      ino: postStat.ino,
+    };
+  }
+
+  // Cap dedup set to last 10k IDs to bound cursor state size — same convention
+  // as Kimi/Copilot so cursors.json doesn't grow unbounded.
+  const seenArr = Array.from(seenIds);
+  const cappedSeen =
+    seenArr.length > 10_000 ? seenArr.slice(seenArr.length - 10_000) : seenArr;
+
+  const bucketsQueued = await enqueueTouchedBuckets({
+    queuePath,
+    hourlyState,
+    touchedBuckets,
+  });
+  const updatedAt = new Date().toISOString();
+  hourlyState.updatedAt = updatedAt;
+  cursors.hourly = hourlyState;
+  cursors.codebuddy = {
+    ...codebuddyState,
+    seenIds: cappedSeen,
+    fileOffsets,
+    updatedAt,
+  };
+
+  return { recordsProcessed, eventsAggregated, bucketsQueued };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GitHub Copilot CLI — OpenTelemetry JSONL exporter
 // User must opt in by setting:
 //   COPILOT_OTEL_ENABLED=true
@@ -4286,6 +4566,10 @@ module.exports = {
   resolveKimiWireFiles,
   resolveKimiDefaultModel,
   parseKimiIncremental,
+  resolveCodebuddyHome,
+  resolveCodebuddyProjectFiles,
+  resolveCodebuddyDefaultModel,
+  parseCodebuddyIncremental,
   resolveKiroCliSessionFiles,
   resolveKiroCliDbPath,
   parseKiroCliIncremental,

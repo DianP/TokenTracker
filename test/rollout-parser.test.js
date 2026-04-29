@@ -14,6 +14,9 @@ const {
   parseHermesIncremental,
   parseCopilotIncremental,
   parseKimiIncremental,
+  parseCodebuddyIncremental,
+  resolveCodebuddyDefaultModel,
+  resolveCodebuddyProjectFiles,
 } = require("../src/lib/rollout");
 
 test("parseRolloutIncremental aggregates repeated token_count records without deduping (matches ccusage)", async () => {
@@ -2607,6 +2610,321 @@ test("parseKimiIncremental returns zero when no wire files exist", async () => {
     assert.equal(result.recordsProcessed, 0);
     assert.equal(result.eventsAggregated, 0);
     assert.equal(result.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CodeBuddy — passive ~/.codebuddy/projects/<cwd>/<sessionId>.jsonl reader.
+// Tencent's CodeBuddy CLI is structurally cloned from Claude Code; assistant
+// messages carry token usage in providerData.rawUsage.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildCodebuddyAssistantLine({
+  uuid,
+  timestamp,
+  model = "hy3-preview-agent",
+  prompt_tokens,
+  completion_tokens,
+  cached_tokens = 0,
+  cache_creation_input_tokens = 0,
+  reasoning_tokens = 0,
+}) {
+  return JSON.stringify({
+    type: "message",
+    role: "assistant",
+    uuid,
+    timestamp,
+    sessionId: "sess-test",
+    providerData: {
+      model,
+      rawUsage: {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens: prompt_tokens + completion_tokens,
+        prompt_tokens_details: { cached_tokens, reasoning_tokens },
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens,
+        credit: 0.42,
+      },
+      usage: {
+        requests: 1,
+        inputTokens: prompt_tokens,
+        outputTokens: completion_tokens,
+        totalTokens: prompt_tokens + completion_tokens,
+      },
+    },
+    message: {
+      usage: {
+        input_tokens: prompt_tokens,
+        output_tokens: completion_tokens,
+        total_tokens: prompt_tokens + completion_tokens,
+      },
+    },
+  });
+}
+
+test("parseCodebuddyIncremental subtracts cached_tokens from prompt_tokens (avoid double-count)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codebuddy-"));
+  try {
+    const projectDir = path.join(tmp, "projects", "encoded-cwd");
+    await fs.mkdir(projectDir, { recursive: true });
+
+    // The user-provided sample: prompt_tokens=22223, cached=512, completion=250
+    // Expected split: input=22223-512=21711, cached=512, output=250.
+    const lines = [
+      JSON.stringify({ type: "topic", topic: "Hello" }),
+      buildCodebuddyAssistantLine({
+        uuid: "msg-1",
+        timestamp: 1777427166667,
+        prompt_tokens: 22223,
+        completion_tokens: 250,
+        cached_tokens: 512,
+      }),
+      // file-history-snapshot must be ignored
+      JSON.stringify({ type: "file-history-snapshot", path: "x.txt" }),
+      // reasoning event (no token usage) must be ignored
+      JSON.stringify({ type: "reasoning", text: "thinking..." }),
+    ].join("\n");
+
+    const sessionFile = path.join(projectDir, "abc.jsonl");
+    await fs.writeFile(sessionFile, lines);
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result = await parseCodebuddyIncremental({
+      projectFiles: [sessionFile],
+      cursors,
+      queuePath,
+    });
+
+    assert.equal(result.recordsProcessed, 1);
+    assert.equal(result.eventsAggregated, 1);
+    assert.ok(result.bucketsQueued > 0);
+
+    const queueRaw = await fs.readFile(queuePath, "utf8");
+    const queueLines = queueRaw.trim().split("\n").filter(Boolean);
+    assert.equal(queueLines.length, 1);
+    const entry = JSON.parse(queueLines[0]);
+
+    assert.equal(entry.source, "codebuddy");
+    assert.equal(entry.model, "hy3-preview-agent");
+    // CRITICAL split: prompt_tokens INCLUDES cached, so input must subtract.
+    assert.equal(entry.input_tokens, 21711);
+    assert.equal(entry.cached_input_tokens, 512);
+    assert.equal(entry.cache_creation_input_tokens, 0);
+    assert.equal(entry.output_tokens, 250);
+    assert.equal(entry.reasoning_output_tokens, 0);
+    // total = 21711 + 250 + 512 + 0 + 0 = 22473
+    assert.equal(entry.total_tokens, 22473);
+    assert.equal(entry.conversation_count, 1);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCodebuddyIncremental dedupes by uuid across runs and aggregates 30-min buckets", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codebuddy-"));
+  try {
+    const projectDir = path.join(tmp, "projects", "encoded-cwd");
+    await fs.mkdir(projectDir, { recursive: true });
+
+    // Two messages 35 minutes apart at 14:00 and 14:35 UTC must land in
+    // distinct half-hour buckets (14:00 + 14:30).
+    const ts1 = Date.UTC(2026, 3, 5, 14, 0, 0);
+    const ts2 = Date.UTC(2026, 3, 5, 14, 35, 0);
+    const lines = [
+      buildCodebuddyAssistantLine({
+        uuid: "msg-A",
+        timestamp: ts1,
+        prompt_tokens: 1000,
+        completion_tokens: 100,
+        cached_tokens: 0,
+      }),
+      buildCodebuddyAssistantLine({
+        uuid: "msg-B",
+        timestamp: ts2,
+        prompt_tokens: 2000,
+        completion_tokens: 200,
+        cached_tokens: 100,
+      }),
+      // Duplicate of msg-A (same uuid) — must be ignored.
+      buildCodebuddyAssistantLine({
+        uuid: "msg-A",
+        timestamp: ts1,
+        prompt_tokens: 1000,
+        completion_tokens: 100,
+        cached_tokens: 0,
+      }),
+    ].join("\n");
+
+    const sessionFile = path.join(projectDir, "session.jsonl");
+    await fs.writeFile(sessionFile, lines);
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result = await parseCodebuddyIncremental({
+      projectFiles: [sessionFile],
+      cursors,
+      queuePath,
+    });
+
+    assert.equal(result.eventsAggregated, 2);
+    assert.equal(result.recordsProcessed, 2); // duplicate dropped before counting
+
+    const queueRaw = await fs.readFile(queuePath, "utf8");
+    const queueLines = queueRaw.trim().split("\n").filter(Boolean);
+    assert.equal(queueLines.length, 2, "two distinct half-hour buckets expected");
+    const buckets = queueLines.map((l) => JSON.parse(l));
+    const hours = buckets.map((b) => b.hour_start).sort();
+    assert.deepEqual(hours, [
+      "2026-04-05T14:00:00.000Z",
+      "2026-04-05T14:30:00.000Z",
+    ]);
+
+    // Cursor state persisted with both message uuids.
+    assert.ok(Array.isArray(cursors.codebuddy?.seenIds));
+    assert.equal(cursors.codebuddy.seenIds.length, 2);
+    assert.ok(cursors.codebuddy.seenIds.includes("msg-A"));
+    assert.ok(cursors.codebuddy.seenIds.includes("msg-B"));
+
+    // Second run on the same file — no new events.
+    const result2 = await parseCodebuddyIncremental({
+      projectFiles: [sessionFile],
+      cursors,
+      queuePath,
+    });
+    assert.equal(result2.eventsAggregated, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCodebuddyIncremental falls back to settings.json model when providerData.model missing", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codebuddy-"));
+  try {
+    // Lay out the canonical ~/.codebuddy/{settings.json,projects/...} so the
+    // resolver picks up the settings.json fallback.
+    await fs.writeFile(
+      path.join(tmp, "settings.json"),
+      JSON.stringify({ model: "hy3-preview" }),
+    );
+    const projectDir = path.join(tmp, "projects", "encoded-cwd");
+    await fs.mkdir(projectDir, { recursive: true });
+
+    // Assistant entry with NO providerData.model and NO entry.model — must
+    // fall back to the resolved settings model.
+    const entryWithoutModel = JSON.stringify({
+      type: "message",
+      role: "assistant",
+      uuid: "msg-no-model",
+      timestamp: Date.UTC(2026, 3, 5, 12, 0, 0),
+      providerData: {
+        rawUsage: {
+          prompt_tokens: 500,
+          completion_tokens: 50,
+          prompt_tokens_details: { cached_tokens: 0 },
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    });
+    await fs.writeFile(path.join(projectDir, "s.jsonl"), entryWithoutModel);
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result = await parseCodebuddyIncremental({
+      projectFiles: [path.join(projectDir, "s.jsonl")],
+      cursors,
+      queuePath,
+      env: { CODEBUDDY_HOME: tmp },
+    });
+
+    assert.equal(result.eventsAggregated, 1);
+    const entry = JSON.parse((await fs.readFile(queuePath, "utf8")).trim());
+    assert.equal(entry.model, "hy3-preview");
+    assert.equal(entry.source, "codebuddy");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCodebuddyIncremental uses 'codebuddy-unknown' fallback when settings.json is absent", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codebuddy-"));
+  try {
+    const fallback = resolveCodebuddyDefaultModel({ CODEBUDDY_HOME: tmp });
+    assert.equal(fallback, "codebuddy-unknown");
+
+    const projectDir = path.join(tmp, "projects", "encoded-cwd");
+    await fs.mkdir(projectDir, { recursive: true });
+    const entryWithoutModel = JSON.stringify({
+      type: "message",
+      role: "assistant",
+      uuid: "msg-bare",
+      timestamp: Date.UTC(2026, 3, 5, 12, 0, 0),
+      providerData: {
+        rawUsage: {
+          prompt_tokens: 100,
+          completion_tokens: 10,
+          prompt_tokens_details: { cached_tokens: 0 },
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+      },
+    });
+    await fs.writeFile(path.join(projectDir, "x.jsonl"), entryWithoutModel);
+
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result = await parseCodebuddyIncremental({
+      projectFiles: [path.join(projectDir, "x.jsonl")],
+      cursors,
+      queuePath,
+      env: { CODEBUDDY_HOME: tmp },
+    });
+
+    assert.equal(result.eventsAggregated, 1);
+    const entry = JSON.parse((await fs.readFile(queuePath, "utf8")).trim());
+    assert.equal(entry.model, "codebuddy-unknown");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("parseCodebuddyIncremental returns zero when no project files exist", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codebuddy-"));
+  try {
+    const queuePath = path.join(tmp, "queue.jsonl");
+    const cursors = { version: 1 };
+    const result = await parseCodebuddyIncremental({
+      projectFiles: [],
+      cursors,
+      queuePath,
+    });
+    assert.equal(result.recordsProcessed, 0);
+    assert.equal(result.eventsAggregated, 0);
+    assert.equal(result.bucketsQueued, 0);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveCodebuddyProjectFiles walks ~/.codebuddy/projects/<cwd>/*.jsonl and skips others", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-codebuddy-"));
+  try {
+    const projectsDir = path.join(tmp, "projects");
+    const cwdA = path.join(projectsDir, "cwd-a");
+    const cwdB = path.join(projectsDir, "cwd-b");
+    await fs.mkdir(cwdA, { recursive: true });
+    await fs.mkdir(cwdB, { recursive: true });
+    await fs.writeFile(path.join(cwdA, "s1.jsonl"), "");
+    await fs.writeFile(path.join(cwdA, "ignored.txt"), "");
+    await fs.writeFile(path.join(cwdB, "s2.jsonl"), "");
+
+    const files = resolveCodebuddyProjectFiles({ CODEBUDDY_HOME: tmp });
+    assert.equal(files.length, 2);
+    assert.ok(files.every((f) => f.endsWith(".jsonl")));
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

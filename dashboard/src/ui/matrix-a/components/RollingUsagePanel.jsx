@@ -44,7 +44,7 @@ export const RollingUsagePanel = React.memo(function RollingUsagePanel({
         </h3>
       </div>
 
-      <div className="grid gap-3 grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((item) => (
           <div key={item.key} className="text-center">
             <div className="text-xs text-oai-gray-500 dark:text-oai-gray-300 mb-0.5">{item.label}</div>

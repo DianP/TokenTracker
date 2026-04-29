@@ -147,7 +147,9 @@ function CopilotOtelHint({ defaultDir }) {
       await navigator.clipboard.writeText(snippet);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch (_e) {}
+    } catch (_e) {
+      // Clipboard can be unavailable in embedded or restricted contexts.
+    }
   };
 
   return (

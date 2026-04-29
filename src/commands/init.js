@@ -22,6 +22,7 @@ const {
 const {
   upsertClaudeHook,
   buildClaudeHookCommand,
+  buildHookCommand,
   isClaudeHookConfigured,
 } = require("../lib/claude-config");
 const {
@@ -303,6 +304,12 @@ function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
   const claudeDir = path.join(home, ".claude");
   const claudeSettingsPath = path.join(claudeDir, "settings.json");
   const claudeHookCommand = buildClaudeHookCommand(notifyPath);
+  // CodeBuddy CLI (Tencent) is a Claude-Code fork — same settings.json hook
+  // schema, same SessionEnd event. We install the same hook with a different
+  // --source token so notify.cjs / sync know which provider triggered.
+  const codebuddyDir = process.env.CODEBUDDY_HOME || path.join(home, ".codebuddy");
+  const codebuddySettingsPath = path.join(codebuddyDir, "settings.json");
+  const codebuddyHookCommand = buildHookCommand(notifyPath, "codebuddy");
   const geminiConfigDir = resolveGeminiConfigDir({ home, env: process.env });
   const geminiSettingsPath = resolveGeminiSettingsPath({ configDir: geminiConfigDir });
   const geminiHookCommand = buildGeminiHookCommand(notifyPath);
@@ -319,6 +326,9 @@ function buildIntegrationTargets({ home, trackerDir, notifyPath }) {
     claudeDir,
     claudeSettingsPath,
     claudeHookCommand,
+    codebuddyDir,
+    codebuddySettingsPath,
+    codebuddyHookCommand,
     geminiConfigDir,
     geminiSettingsPath,
     geminiHookCommand,
@@ -413,6 +423,20 @@ async function applyIntegrationSetup({ home, trackerDir, notifyPath, notifyOrigi
     if (fssync.existsSync(kimiSessions)) {
       summary.push({ label: "Kimi Code", status: "detected", detail: "Passive reader (no hook needed)" });
     }
+  }
+
+  // CodeBuddy: Claude-Code fork. Install the SessionEnd hook so finished
+  // sessions trigger notify.cjs → tracker sync; passive scan still runs as a
+  // safety net for sessions that don't fire SessionEnd cleanly.
+  const codebuddyDirExists = await isDir(context.codebuddyDir);
+  if (codebuddyDirExists) {
+    await upsertClaudeHook({
+      settingsPath: context.codebuddySettingsPath,
+      hookCommand: context.codebuddyHookCommand,
+    });
+    summary.push({ label: "CodeBuddy", status: "installed", detail: "Hooks installed" });
+  } else {
+    summary.push({ label: "CodeBuddy", status: "skipped", detail: "Config not found" });
   }
 
   const openclawBefore = await probeOpenclawSessionPluginState({
@@ -521,6 +545,21 @@ async function previewIntegrations({ context }) {
     });
   } else {
     summary.push({ label: "Claude", status: "skipped", detail: "Config not found" });
+  }
+
+  const codebuddyDirExists = await isDir(context.codebuddyDir);
+  if (codebuddyDirExists) {
+    const configured = await isClaudeHookConfigured({
+      settingsPath: context.codebuddySettingsPath,
+      hookCommand: context.codebuddyHookCommand,
+    });
+    summary.push({
+      label: "CodeBuddy",
+      status: "installed",
+      detail: configured ? "Hooks already installed" : "Will install hooks",
+    });
+  } else {
+    summary.push({ label: "CodeBuddy", status: "skipped", detail: "Config not found" });
   }
 
   const geminiConfigExists = await isDir(context.geminiConfigDir);
@@ -771,7 +810,7 @@ try {
   const originalPath =
     source === 'every-code'
       ? codeOriginalPath
-      : source === 'claude' || source === 'opencode' || source === 'gemini'
+      : source === 'claude' || source === 'opencode' || source === 'gemini' || source === 'codebuddy'
         ? null
         : codexOriginalPath;
   if (originalPath) {
@@ -816,7 +855,7 @@ function isSelfNotify(cmd) {
 `;
 }
 
-module.exports = { cmdInit };
+module.exports = { cmdInit, buildNotifyHandler };
 
 async function probeFile(p) {
   try {

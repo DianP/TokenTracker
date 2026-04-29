@@ -6,6 +6,7 @@ const cp = require("node:child_process");
 
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
 const { createLocalApiHandler, resolveQueuePath } = require("../lib/local-api");
+const { ensurePricingLoaded } = require("../lib/pricing");
 const { serveStaticFile } = require("../lib/static-server");
 const { openInBrowser } = require("../lib/browser-auth");
 
@@ -63,6 +64,16 @@ async function cmdServe(argv) {
   // 2. Resolve paths
   const queuePath = resolveQueuePath();
   const dashboardDir = resolveDashboardDir();
+
+  // 2.1 Refresh LiteLLM pricing data in the background. The seed snapshot is
+  //     already loaded synchronously at require-time, so cost calculation is
+  //     functional right now; ensurePricingLoaded() only upgrades to fresh
+  //     disk cache or upstream data. Awaiting it here would block startup
+  //     for the full 10s fetch timeout when offline / behind a firewall.
+  const { cacheDir } = await resolveTrackerPaths();
+  ensurePricingLoaded({ cachePath: path.join(cacheDir, "pricing.json") }).catch(
+    (e) => process.stdout.write(`Pricing refresh warning: ${e?.message || e}\n`),
+  );
 
   if (!dashboardDir) {
     process.stderr.write(

@@ -1,4 +1,4 @@
-import { safeGetItem, safeSetItem } from "./safe-browser.ts";
+import { safeGetItem, safeSetItem } from "./safe-browser";
 
 export const LOCALE_STORAGE_KEY = "tokentracker-locale";
 export const SYSTEM_LOCALE = "system";

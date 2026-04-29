@@ -27,6 +27,8 @@ const {
   parseCopilotIncremental,
   resolveKimiWireFiles,
   parseKimiIncremental,
+  resolveCodebuddyProjectFiles,
+  parseCodebuddyIncremental,
   resolveKiroCliSessionFiles,
   resolveKiroCliDbPath,
   parseKiroCliIncremental,
@@ -418,6 +420,30 @@ async function cmdSync(argv) {
       });
     }
 
+    // ── CodeBuddy CLI (passive ~/.codebuddy/projects/**/*.jsonl reader) ──
+    // Tencent's CodeBuddy CLI is a Claude Code clone; no hook system, so we
+    // tail the per-session JSONL conversation logs incrementally on each sync.
+    let codebuddyResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const codebuddyFiles = resolveCodebuddyProjectFiles(process.env);
+    if (codebuddyFiles.length > 0) {
+      if (progress?.enabled) {
+        progress.start(`Parsing CodeBuddy ${renderBar(0)} | buckets 0`);
+      }
+      codebuddyResult = await parseCodebuddyIncremental({
+        projectFiles: codebuddyFiles,
+        cursors,
+        queuePath,
+        env: process.env,
+        onProgress: (p) => {
+          if (!progress?.enabled) return;
+          const pct = p.total > 0 ? p.index / p.total : 1;
+          progress.update(
+            `Parsing CodeBuddy ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+          );
+        },
+      });
+    }
+
     // ── GitHub Copilot CLI (OTEL JSONL files) ──
     let copilotResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
     const copilotPaths = resolveCopilotOtelPaths(process.env);
@@ -536,6 +562,7 @@ async function cmdSync(argv) {
         kiroCliResult.recordsProcessed +
         hermesResult.recordsProcessed +
         kimiResult.recordsProcessed +
+        codebuddyResult.recordsProcessed +
         copilotResult.recordsProcessed;
       const totalBuckets =
         parseResult.bucketsQueued +
@@ -548,6 +575,7 @@ async function cmdSync(argv) {
         kiroCliResult.bucketsQueued +
         hermesResult.bucketsQueued +
         kimiResult.bucketsQueued +
+        codebuddyResult.bucketsQueued +
         copilotResult.bucketsQueued;
       process.stdout.write(
         [

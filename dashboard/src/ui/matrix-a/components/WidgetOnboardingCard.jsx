@@ -36,7 +36,9 @@ export function WidgetOnboardingCard() {
     setDismissed(true);
     try {
       localStorage.setItem(DISMISS_KEY, "1");
-    } catch {}
+    } catch {
+      // Ignore storage failures; the card can reappear next session.
+    }
   }, []);
 
   if (!isNativeApp) return null;
