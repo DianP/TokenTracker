@@ -816,7 +816,7 @@ try {
   if (originalPath) {
     const original = JSON.parse(fs.readFileSync(originalPath, 'utf8'));
     const cmd = Array.isArray(original?.notify) ? original.notify : null;
-    if (cmd && cmd.length > 0 && !isSelfNotify(cmd)) {
+    if (cmd && cmd.length > 0 && !isSelfNotify(cmd) && shouldChainNotify(cmd)) {
       const args = cmd.slice(1);
       if (payloadArgs.length > 0) args.push(...payloadArgs);
       spawnDetached([cmd[0], ...args]);
@@ -851,6 +851,30 @@ function isSelfNotify(cmd) {
     if (resolved && resolved === selfPath) return true;
   }
   return false;
+}
+
+function shouldChainNotify(cmd) {
+  if (!Array.isArray(cmd) || cmd.length === 0) return false;
+  if (containsSkyComputerUseClient(cmd)) return false;
+  return isRunnableCommand(cmd[0]);
+}
+
+function containsSkyComputerUseClient(cmd) {
+  return cmd.some((part) => typeof part === 'string' && part.includes('SkyComputerUseClient'));
+}
+
+function isRunnableCommand(command) {
+  if (typeof command !== 'string' || command.length === 0) return false;
+  const explicitPath = command.startsWith('~/') || command.includes('/');
+  if (!explicitPath) return true;
+  const resolved = resolveMaybeHome(command);
+  if (!resolved) return false;
+  try {
+    fs.accessSync(resolved, fs.constants.X_OK);
+    return true;
+  } catch (_) {
+    return false;
+  }
 }
 `;
 }
