@@ -4,10 +4,6 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Fixed
-
-- `tokentracker serve` now suggests `npx tokentracker-cli serve --port ...` when the requested port is still occupied, matching the published npm package name and avoiding the `E404` path reported in issue #30.
-
 ### Added
 
 - **Kimi provider** — passive token tracking via `~/.kimi/sessions/**/wire.jsonl`. No hook or configuration required; TokenTracker reads Kimi's wire log directly on every sync.
@@ -16,7 +12,13 @@ All notable changes to this project will be documented in this file.
   - `tokentracker init` detects the Kimi sessions directory and surfaces it as a passive reader in the setup summary.
   - Dashboard model-breakdown shows Kimi with brand logo (`kimi.svg`) and violet color (`#a78bfa`).
   - Model reported as `kimi-k2` (wire.jsonl does not expose the model name).
+- **oh-my-pi (omp)** — passive token tracking via `~/.omp/agent/sessions/**/*.jsonl`. No hook or configuration required; TokenTracker reads oh-my-pi session files directly on every sync.
+  - `parseOmpIncremental` in `rollout.js` follows the file-offset + 8-char entry id dedup pattern (same as Kimi/CodeBuddy/Copilot) to avoid double-counting across incremental syncs.
+  - `tokentracker status` reports the number of session JSONL files found when `~/.omp/agent/sessions` exists.
+  - Model reported per-message via `msg.model` (falls back to `omp-unknown`).
 
+### Fixed
+- `tokentracker serve` now suggests `npx tokentracker-cli serve --port ...` when the requested port is still occupied, matching the published npm package name and avoiding the `E404` path reported in issue #30.
 ## [0.5.17] - 2026-03-31
 
 ### Fixed
